@@ -43,7 +43,7 @@ const OBJECTS = {
 - [x] Аккаунт GitHub есть (Gerundg)
 - [x] Веб-приложение развернуто, URL `/exec` вставлен в index.html (проверено: doGet отвечает)
 - [x] index.html и планы выложены на GitHub Pages
-- [ ] Mini App создан в BotFather (`/newapp`, short name `place`) — проверить
+- [x] Mini App создан в BotFather (short name `place`, t.me/monart_smartsite_bot/place), 2026-10-02
 - [ ] Проверка с телефона в «тест 1»: точка доходит в тему и в Inbox
 
 ## Следующая задача: план всей Биолаборатории
