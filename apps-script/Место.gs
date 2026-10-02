@@ -10,6 +10,7 @@ const MESTO_APP_SHORT_NAME = 'place';            // короткое имя Mini
 const MESTO_PEOPLE_CHAT    = '-1004315776569';   // объект, в таблице которого лежит лист TOPIC_NAMES
 const MESTO_PEOPLE_SHEET   = 'TOPIC_NAMES';
 const MESTO_SURFACES       = ['пол', 'потолок', 'стена'];
+const MESTO_MAX_PHOTOS     = 5;
 
 // Куда повесить закреп с кнопкой (функция mesto_postPinButton)
 // Уже закреплено (не запускать повторно, иначе будет вторая кнопка):
@@ -49,6 +50,7 @@ function doPost(e) {
     const comment   = mesto_clean_(body.comment, 500);
     if (!floor || !axes) throw new Error('Не выбрана точка на плане.');
     if (MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Не выбрана поверхность.');
+    const photos = mesto_photos_(body.photos);
 
     // 4. Кто отправил (ищем в листе TOPIC_NAMES по @username)
     const person = mesto_findPerson_(user.username);
@@ -59,19 +61,17 @@ function doPost(e) {
     if (comment) text += '\nКомментарий: ' + comment;
     text += ' (от ' + name + ')';
 
-    // 6. Пишем в тему
-    const sent = mesto_tg_('sendMessage', mesto_withThread_({
-      chat_id: target.chatId,
-      text: text
-    }, target.threadId));
+    // 6. Пишем в тему: без фото — сообщение, с фото — фото/альбом с подписью
+    const messageId = mesto_send_(target, text, photos);
 
     // 7. Сразу пишем строку в Inbox (свои сообщения бот через getUpdates не видит)
-    const link = mesto_messageLink_(target.chatId, target.threadId, sent.message_id);
+    const link = mesto_messageLink_(target.chatId, target.threadId, messageId);
     const sender = name + (user.username ? ' (@' + user.username + ')' : '');
     const companyRole = [person.company, person.role].filter(String).join(' / ') || '-';
     const sheet = SpreadsheetApp.openById(obj.sheetId).getSheetByName('Inbox');
     if (!sheet) throw new Error('В таблице объекта «' + obj.name + '» нет листа Inbox.');
-    sheet.appendRow([new Date(), text, link, sender, companyRole, 'Место', 'Нет']);
+    const inboxText = text + (photos.length ? '\n📷 Фото: ' + photos.length : '');
+    sheet.appendRow([new Date(), inboxText, link, sender, companyRole, 'Место', 'Нет']);
 
     return mesto_json_({ ok: true });
   } catch (err) {
@@ -164,6 +164,51 @@ function mesto_tg_(method, payload) {
   return res.result;
 }
 
+/** Вызов Telegram Bot API с файлами (multipart). Все поля — строки или Blob. */
+function mesto_tgFiles_(method, fields) {
+  const resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + TELEGRAM_TOKEN + '/' + method, {
+    method: 'post',
+    payload: fields,
+    muteHttpExceptions: true
+  });
+  const res = JSON.parse(resp.getContentText());
+  if (!res.ok) throw new Error('Telegram (' + method + '): ' + res.description);
+  return res.result;
+}
+
+/** Фото из мини-приложения: массив base64 JPEG → массив Blob (не больше MESTO_MAX_PHOTOS). */
+function mesto_photos_(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, MESTO_MAX_PHOTOS).map(function (b64, i) {
+    if (typeof b64 !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 8000000) {
+      throw new Error('Фото ' + (i + 1) + ' повреждено или слишком большое.');
+    }
+    return Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', 'photo' + (i + 1) + '.jpg');
+  });
+}
+
+/** Отправляет точку в тему. Возвращает message_id (для ссылки в Inbox). */
+function mesto_send_(target, text, photos) {
+  if (!photos.length) {
+    return mesto_tg_('sendMessage', mesto_withThread_({ chat_id: target.chatId, text: text }, target.threadId)).message_id;
+  }
+  const caption = text.slice(0, 1024);   // лимит подписи в Telegram
+  const fields = mesto_withThread_({ chat_id: target.chatId }, target.threadId);
+  if (fields.message_thread_id) fields.message_thread_id = String(fields.message_thread_id);
+  if (photos.length === 1) {
+    fields.photo = photos[0];
+    fields.caption = caption;
+    return mesto_tgFiles_('sendPhoto', fields).message_id;
+  }
+  fields.media = JSON.stringify(photos.map(function (p, i) {
+    const m = { type: 'photo', media: 'attach://p' + i };
+    if (i === 0) m.caption = caption;
+    return m;
+  }));
+  photos.forEach(function (p, i) { fields['p' + i] = p; });
+  return mesto_tgFiles_('sendMediaGroup', fields)[0].message_id;
+}
+
 /** Добавляет message_thread_id, если тема не «Общая». */
 function mesto_withThread_(payload, threadId) {
   if (threadId && threadId !== 1) payload.message_thread_id = threadId;
@@ -211,6 +256,23 @@ function mesto_postPinButton() {
  * Должно прийти сообщение в тему и появиться строка в Inbox.
  */
 function mesto_testSend() {
+  console.log(mesto_testPost_([]));
+}
+
+/**
+ * Тест фото без телефона: отправляет в «тест 1» точку с двумя картинками (альбом).
+ * Картинки берутся с сайта мини-приложения.
+ */
+function mesto_testSendPhoto() {
+  const base = 'https://gerundg.github.io/monart-place/plans/';
+  const photos = ['bio-18410.png', 'bio-3200.png'].map(function (f) {
+    return Utilities.base64Encode(UrlFetchApp.fetch(base + f).getBlob().getBytes());
+  });
+  console.log(mesto_testPost_(photos));
+}
+
+/** Имитация запроса из мини-приложения с настоящей подписью (для тестов). */
+function mesto_testPost_(photos) {
   const fields = {
     auth_date: String(Math.floor(Date.now() / 1000)),
     query_id: 'test',
@@ -227,8 +289,9 @@ function mesto_testSend() {
 
   const out = doPost({ postData: { contents: JSON.stringify({
     initData: initData,
-    floor: '1 этаж', elevation: '+0.000', axes: '3–4 / Б–В',
-    surface: 'потолок', comment: 'Тестовая отправка из редактора'
+    floor: '1 этаж', elevation: '+0.000', axes: '3-4/Б-В',
+    surface: 'потолок', comment: 'Тестовая отправка из редактора',
+    photos: photos
   }) } });
-  console.log(out.getContent());
+  return out.getContent();
 }

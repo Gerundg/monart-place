@@ -48,6 +48,12 @@
   .seg button{flex:1;padding:9px 0;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);font-size:15px;cursor:pointer}
   .seg button.on{background:var(--btn);color:var(--btn-text);border-color:var(--btn)}
   textarea{width:100%;resize:none;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);-webkit-user-select:text;user-select:text}
+  .photos{display:flex;gap:6px;align-items:center;overflow-x:auto}
+  #addPhoto{flex:none;padding:9px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);font-size:15px;cursor:pointer}
+  #addPhoto:disabled{opacity:.45;cursor:default}
+  .thumb{position:relative;flex:none;width:52px;height:52px;border-radius:6px;overflow:hidden;background:var(--sec)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb button{position:absolute;top:1px;right:1px;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:13px;line-height:20px;cursor:pointer}
   #send{padding:12px;border:0;border-radius:10px;background:var(--btn);color:var(--btn-text);font-size:16px;font-weight:600;cursor:pointer}
   #send:disabled{opacity:.45;cursor:default}
   #status{font-size:13px;min-height:16px;color:var(--hint)}
@@ -84,6 +90,10 @@
     <button data-v="стена">Стена</button>
   </div>
   <textarea id="comment" rows="2" maxlength="500" placeholder="Комментарий (необязательно)"></textarea>
+  <div class="photos" id="photos">
+    <button id="addPhoto" type="button">📷 Фото</button>
+    <input id="photoInput" type="file" accept="image/*" multiple hidden>
+  </div>
   <button id="send" disabled>Отправить</button>
   <div id="status"></div>
   <div id="debug" hidden></div>
@@ -471,6 +481,58 @@ document.querySelectorAll('#surfaces button').forEach(b => {
   };
 });
 
+// ---------- Фото (до 5 штук, сжимаются на телефоне) ----------
+const MAX_PHOTOS = 5, PHOTO_SIDE = 1600, PHOTO_QUALITY = 0.8;
+const photos = [];   // { data: base64 JPEG без префикса, url: адрес миниатюры }
+
+function compressPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, PHOTO_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.naturalWidth * k);
+      c.height = Math.round(im.naturalHeight * k);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = c.toDataURL('image/jpeg', PHOTO_QUALITY);
+      resolve({ data: dataUrl.slice(dataUrl.indexOf(',') + 1), url: dataUrl });
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('не удалось открыть ' + file.name)); };
+    im.src = url;
+  });
+}
+
+function renderPhotos() {
+  const box = $('photos');
+  box.querySelectorAll('.thumb').forEach(el => el.remove());
+  photos.forEach((p, i) => {
+    const t = document.createElement('div');
+    t.className = 'thumb';
+    t.innerHTML = `<img alt="Фото ${i + 1}"><button type="button" aria-label="Убрать фото">×</button>`;
+    t.querySelector('img').src = p.url;
+    t.querySelector('button').onclick = () => { photos.splice(i, 1); renderPhotos(); };
+    box.appendChild(t);
+  });
+  $('addPhoto').textContent = photos.length ? `📷 ${photos.length}/${MAX_PHOTOS}` : '📷 Фото';
+  $('addPhoto').disabled = photos.length >= MAX_PHOTOS || sending;
+}
+
+$('addPhoto').onclick = () => $('photoInput').click();
+$('photoInput').onchange = async e => {
+  const files = [...e.target.files].slice(0, MAX_PHOTOS - photos.length);
+  e.target.value = '';
+  if (!files.length) return;
+  setStatus('Готовлю фото…');
+  for (const f of files) {
+    try { photos.push(await compressPhoto(f)); }
+    catch (err) { setStatus('Фото: ' + err.message, 'err'); }
+  }
+  if (statusEl.textContent === 'Готовлю фото…') setStatus('');
+  renderPhotos();
+};
+
 // ---------- Отправка ----------
 sendBtn.onclick = async () => {
   if (!point || !surface) return;
@@ -487,10 +549,11 @@ sendBtn.onclick = async () => {
     surface: surface,
     comment: $('comment').value.trim(),
     px: Math.round(point.x),
-    py: Math.round(point.y)
+    py: Math.round(point.y),
+    photos: photos.map(p => p.data)
   };
-  sending = true; updateResult();
-  setStatus('Отправляю…');
+  sending = true; updateResult(); renderPhotos();
+  setStatus(photos.length ? `Отправляю (фото: ${photos.length})…` : 'Отправляю…');
   try {
     const r = await fetch(WEB_APP_URL, {
       method: 'POST',
@@ -505,11 +568,11 @@ sendBtn.onclick = async () => {
     } else {
       setStatus('Ошибка: ' + (res.error || 'неизвестная') + ' [' + DIAG + ']', 'err');
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-      sending = false; updateResult();
+      sending = false; updateResult(); renderPhotos();
     }
   } catch (err) {
     setStatus('Нет связи с сервером: ' + err.message, 'err');
-    sending = false; updateResult();
+    sending = false; updateResult(); renderPhotos();
   }
 };
 
