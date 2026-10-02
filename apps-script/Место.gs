@@ -48,21 +48,27 @@ function doPost(e) {
     const axes      = mesto_clean_(body.axes, 40);
     const surface   = mesto_clean_(body.surface, 20);
     const comment   = mesto_clean_(body.comment, 500);
-    if (!floor || !axes) throw new Error('Не выбрана точка на плане.');
-    if (MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Не выбрана поверхность.');
     const photos = mesto_photos_(body.photos);
+    const plan = body.plan ? mesto_photos_([body.plan])[0] : null;   // схема с меткой (генплан)
+    if (!floor || !(axes || plan)) throw new Error('Не выбрана точка на плане.');
+    if (!plan && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Не выбрана поверхность.');
+    if (surface && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Неизвестная поверхность.');
 
     // 4. Кто отправил (ищем в листе TOPIC_NAMES по @username)
     const person = mesto_findPerson_(user.username);
-    const name = person.name || [user.first_name, user.last_name].filter(String).join(' ') || ('id ' + user.id);
+    const name = person.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || ('id ' + user.id);
 
     // 5. Текст сообщения
-    let text = '📍 ' + floor + ', отм. ' + elevation + ', оси ' + axes + ', ' + surface + '.';
+    let text = '📍 ' + floor +
+      (elevation ? ', отм. ' + elevation : '') +
+      (axes ? ', оси ' + axes : '') +
+      (surface ? ', ' + surface : '') +
+      (plan ? ' — место отмечено на схеме' : '') + '.';
     if (comment) text += '\nКомментарий: ' + comment;
     text += ' (от ' + name + ')';
 
     // 6. Пишем в тему: без фото — сообщение, с фото — фото/альбом с подписью
-    const messageId = mesto_send_(target, text, photos);
+    const messageId = mesto_send_(target, text, plan ? [plan].concat(photos) : photos);
 
     // 7. Сразу пишем строку в Inbox (свои сообщения бот через getUpdates не видит)
     const link = mesto_messageLink_(target.chatId, target.threadId, messageId);
@@ -70,7 +76,7 @@ function doPost(e) {
     const companyRole = [person.company, person.role].filter(String).join(' / ') || '-';
     const sheet = SpreadsheetApp.openById(obj.sheetId).getSheetByName('Inbox');
     if (!sheet) throw new Error('В таблице объекта «' + obj.name + '» нет листа Inbox.');
-    const inboxText = text + (photos.length ? '\n📷 Фото: ' + photos.length : '');
+    const inboxText = text + (photos.length ? '\n📷 Фото: ' + photos.length : '') + (plan ? '\n🗺 Схема с меткой' : '');
     sheet.appendRow([new Date(), inboxText, link, sender, companyRole, 'Место', 'Нет']);
 
     return mesto_json_({ ok: true });
@@ -271,8 +277,18 @@ function mesto_testSendPhoto() {
   console.log(mesto_testPost_(photos));
 }
 
+/**
+ * Тест генплана без телефона: точка без осей + схема с меткой (кусок генплана с сайта) в «тест 1».
+ */
+function mesto_testSendPlan() {
+  const plan = Utilities.base64Encode(
+    UrlFetchApp.fetch('https://gerundg.github.io/monart-place/plans/med-genplan.png').getBlob().getBytes());
+  console.log(mesto_testPost_([], { floor: 'Ген.план', elevation: '', axes: '', surface: '', plan: plan,
+                                    comment: 'Тест генплана из редактора' }));
+}
+
 /** Имитация запроса из мини-приложения с настоящей подписью (для тестов). */
-function mesto_testPost_(photos) {
+function mesto_testPost_(photos, override) {
   const fields = {
     auth_date: String(Math.floor(Date.now() / 1000)),
     query_id: 'test',
@@ -287,11 +303,13 @@ function mesto_testPost_(photos) {
     return encodeURIComponent(k) + '=' + encodeURIComponent(fields[k]);
   }).join('&');
 
-  const out = doPost({ postData: { contents: JSON.stringify({
+  const req = {
     initData: initData,
     floor: '1 этаж', elevation: '+0.000', axes: '3-4/Б-В',
     surface: 'потолок', comment: 'Тестовая отправка из редактора',
     photos: photos
-  }) } });
+  };
+  Object.keys(override || {}).forEach(function (k) { req[k] = override[k]; });
+  const out = doPost({ postData: { contents: JSON.stringify(req) } });
   return out.getContent();
 }

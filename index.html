@@ -32,9 +32,9 @@
   .bar .floor-name{flex:1;font-weight:600}
   .zoom{display:flex;gap:6px}
   .zoom button{width:38px;height:34px;border:0;border-radius:8px;background:var(--bg);color:var(--text);font-size:18px;cursor:pointer}
-  #vp{flex:1;position:relative;overflow:hidden;touch-action:none;background:#dfe4e9;cursor:crosshair}
+  #vp{flex:1;position:relative;overflow:hidden;touch-action:none;background:#fff;cursor:crosshair}
   #stage{position:absolute;left:0;top:0;transform-origin:0 0}
-  #plan{display:block;max-width:none;pointer-events:none;-webkit-user-drag:none;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+  #plan{display:block;max-width:none;pointer-events:none;-webkit-user-drag:none}
   #marker{position:absolute;width:0;height:0;transform-origin:0 0}
   #marker .pin{position:absolute;left:-13px;top:-32px;width:26px;height:26px;background:var(--pin);
     border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 6px rgba(0,0,0,.35)}
@@ -143,7 +143,14 @@ const BIO_FLOORS = [
     axes: {"1":[156,697,156,120], "2":[291,697,291,120], "3":[426,697,426,120], "4":[561,697,561,120], "5":[696,697,696,120], "6":[831,697,831,120], "7":[966,697,966,120], "8":[1102,697,1102,120], "9":[1237,697,1237,120], "10":[1372,697,1372,120], "11":[1507,697,1507,120], "12":[1642,697,1642,120], "13":[1778,697,1778,120], "14":[1913,697,1913,120], "15":[2048,697,2048,120], "16":[2183,697,2183,120], "А":[2368,616,2946,616], "Б":[2342,374,2920,374], "В":[2342,274,2920,274], "Г":[2342,32,2920,32], "1'":[32,697,142,130], "5''":[2306,697,2196,130]} },
 ];
 // Какие планы показывать в каком чате (chat_id из ссылки). Остальным — демо-план.
+// Мед колледж: стройгенплан. site: true — без осей и поверхности; к сообщению прикладывается
+// картинка генплана с меткой (кусок вокруг точки). Источник: «СГП_Сколково_Колледж_ПЧ_в_МГЭ_30.07.2026.dwg».
+const MED_FLOORS = [
+  { name: 'Ген.план', elevation: '', image: 'plans/med-genplan.png', site: true }
+];
+
 const PLANS = {
+  '-1004315776569': MED_FLOORS,  // Мед колледж
   '-1004448770601': BIO_FLOORS   // Биолаборатория
 };
 
@@ -260,11 +267,15 @@ function zoomAt(cx, cy, factor) {
   apply();
 }
 
+// «2 этаж, отм. +0.000» или просто «Ген.план»
+function floorLabel(f) { return f.elevation ? `${f.name}, отм. ${f.elevation}` : f.name; }
+
 function loadFloor(i) {
   floorIdx = i;
   const f = FLOORS[i];
-  grids = buildGrids(f);
-  $('floorName').textContent = FLOORS.length > 1 ? '' : `${f.name}, отм. ${f.elevation}`;
+  grids = f.site ? [] : buildGrids(f);
+  $('floorName').textContent = FLOORS.length > 1 ? '' : floorLabel(f);
+  $('surfaces').style.display = f.site ? 'none' : '';
   point = null;
   marker.hidden = true;
   img.onload = () => {
@@ -466,10 +477,11 @@ function updateResult() {
     resultEl.textContent = 'Точка не выбрана';
     resultEl.className = 'empty';
   } else {
-    resultEl.textContent = `${f.name}, отм. ${f.elevation}, оси ${axesText()}` + (surface ? `, ${surface}` : '');
+    resultEl.textContent = f.site ? `${floorLabel(f)}: место отмечено, схема уйдёт вместе с фото`
+      : `${floorLabel(f)}, оси ${axesText()}` + (surface ? `, ${surface}` : '');
     resultEl.className = '';
   }
-  sendBtn.disabled = !(point && surface) || sending;
+  sendBtn.disabled = !(point && (surface || f.site)) || sending;
 }
 
 document.querySelectorAll('#surfaces button').forEach(b => {
@@ -533,23 +545,52 @@ $('photoInput').onchange = async e => {
   renderPhotos();
 };
 
+// ---------- Схема с меткой (для генплана) ----------
+// Кусок плана вокруг точки (примерно половина плана) с красной меткой, JPEG base64.
+function planSnapshot() {
+  const OUT_W = 1280, OUT_H = 960;
+  let cw = Math.max(imgW * 0.55, 900), ch = cw * OUT_H / OUT_W;
+  if (ch > imgH) { ch = imgH; cw = ch * OUT_W / OUT_H; }
+  if (cw > imgW) { cw = imgW; ch = cw * OUT_H / OUT_W; }
+  const cx = Math.max(0, Math.min(imgW - cw, point.x - cw / 2));
+  const cy = Math.max(0, Math.min(imgH - ch, point.y - ch / 2));
+  const c = document.createElement('canvas');
+  c.width = OUT_W; c.height = OUT_H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, OUT_W, OUT_H);
+  g.drawImage(img, cx, cy, cw, ch, 0, 0, OUT_W, OUT_H);
+  const k = OUT_W / cw, x = (point.x - cx) * k, y = (point.y - cy) * k;
+  g.lineWidth = 7; g.strokeStyle = '#e8412c';
+  g.beginPath(); g.arc(x, y, 46, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#e8412c'; g.strokeStyle = '#fff'; g.lineWidth = 3;
+  g.beginPath(); g.arc(x, y, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+  const d = c.toDataURL('image/jpeg', 0.85);
+  return d.slice(d.indexOf(',') + 1);
+}
+
 // ---------- Отправка ----------
 sendBtn.onclick = async () => {
-  if (!point || !surface) return;
+  const f = FLOORS[floorIdx];
+  if (!point || !(surface || f.site)) return;
   if (!/^https:\/\//.test(WEB_APP_URL)) {
     setStatus('В index.html не вставлен WEB_APP_URL.', 'err');
     return;
   }
-  const f = FLOORS[floorIdx];
+  let snapshot = null;
+  if (f.site) {
+    try { snapshot = planSnapshot(); }
+    catch (err) { setStatus('Не удалось сделать схему: ' + err.message, 'err'); return; }
+  }
   const payload = {
     initData: initData,
     floor: f.name,
     elevation: f.elevation,
-    axes: axesText(),
-    surface: surface,
+    axes: f.site ? '' : axesText(),
+    surface: f.site ? '' : surface,
     comment: $('comment').value.trim(),
     px: Math.round(point.x),
     py: Math.round(point.y),
+    plan: snapshot,                     // схема с меткой — уйдёт первой картинкой
     photos: photos.map(p => p.data)
   };
   sending = true; updateResult(); renderPhotos();
@@ -582,7 +623,7 @@ sendBtn.onclick = async () => {
     const sel = $('floorSel');
     FLOORS.forEach((f, i) => {
       const o = document.createElement('option');
-      o.value = i; o.textContent = `${f.name}, отм. ${f.elevation}`;
+      o.value = i; o.textContent = floorLabel(f);
       sel.appendChild(o);
     });
     sel.hidden = false;
