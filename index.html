@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Указать место</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1b1f24);
+    --hint: var(--tg-theme-hint-color, #7d868f);
+    --sec: var(--tg-theme-secondary-bg-color, #eef1f4);
+    --btn: var(--tg-theme-button-color, #2a7de1);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --pin: #e8412c;
+    --ok: #1f9d55;
+    --err: #d93025;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    height: var(--tg-viewport-stable-height, 100vh);
+    display:flex;flex-direction:column;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:15px;background:var(--bg);color:var(--text);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    -webkit-user-select:none;user-select:none;
+  }
+  .bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--sec)}
+  .bar select{flex:1;min-width:0;font-size:15px;padding:6px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--bg);color:var(--text)}
+  .bar .floor-name{flex:1;font-weight:600}
+  .zoom{display:flex;gap:6px}
+  .zoom button{width:38px;height:34px;border:0;border-radius:8px;background:var(--bg);color:var(--text);font-size:18px;cursor:pointer}
+  #vp{flex:1;position:relative;overflow:hidden;touch-action:none;background:#dfe4e9;cursor:crosshair}
+  #stage{position:absolute;left:0;top:0;transform-origin:0 0}
+  #plan{display:block;max-width:none;pointer-events:none;-webkit-user-drag:none;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+  #marker{position:absolute;width:0;height:0;transform-origin:0 0}
+  #marker .pin{position:absolute;left:-13px;top:-32px;width:26px;height:26px;background:var(--pin);
+    border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 6px rgba(0,0,0,.35)}
+  #marker .dot{position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:#fff;border:1px solid var(--pin)}
+  #hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fff;
+    padding:6px 12px;border-radius:14px;font-size:13px;pointer-events:none;white-space:nowrap}
+  .panel{padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--bg);border-top:1px solid rgba(0,0,0,.08)}
+  #result{font-weight:600;min-height:20px}
+  #result.empty{font-weight:400;color:var(--hint)}
+  .seg{display:flex;gap:6px}
+  .seg button{flex:1;padding:9px 0;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);font-size:15px;cursor:pointer}
+  .seg button.on{background:var(--btn);color:var(--btn-text);border-color:var(--btn)}
+  textarea{width:100%;resize:none;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);-webkit-user-select:text;user-select:text}
+  #send{padding:12px;border:0;border-radius:10px;background:var(--btn);color:var(--btn-text);font-size:16px;font-weight:600;cursor:pointer}
+  #send:disabled{opacity:.45;cursor:default}
+  #status{font-size:13px;min-height:16px;color:var(--hint)}
+  #status.ok{color:var(--ok)} #status.err{color:var(--err)}
+  #debug{font-size:12px;color:var(--hint)}
+  button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--btn);outline-offset:1px}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <select id="floorSel" hidden></select>
+  <span id="floorName" class="floor-name"></span>
+  <div class="zoom">
+    <button id="zIn" aria-label="Приблизить">+</button>
+    <button id="zOut" aria-label="Отдалить">−</button>
+    <button id="zFit" aria-label="Весь план">⤢</button>
+  </div>
+</header>
+
+<main id="vp">
+  <div id="stage">
+    <img id="plan" alt="План этажа" draggable="false">
+    <div id="marker" hidden><div class="pin"></div><div class="dot"></div></div>
+  </div>
+  <div id="hint">Коснитесь плана в нужном месте</div>
+</main>
+
+<section class="panel">
+  <div id="result" class="empty">Точка не выбрана</div>
+  <div class="seg" id="surfaces">
+    <button data-v="пол">Пол</button>
+    <button data-v="потолок">Потолок</button>
+    <button data-v="стена">Стена</button>
+  </div>
+  <textarea id="comment" rows="2" maxlength="500" placeholder="Комментарий (необязательно)"></textarea>
+  <button id="send" disabled>Отправить</button>
+  <div id="status"></div>
+  <div id="debug" hidden></div>
+</section>
+
+<script>
+// ================= НАСТРОЙКИ (меняйте только здесь) =================
+
+// URL веб-приложения из Apps Script (заканчивается на /exec)
+const WEB_APP_URL = 'ВСТАВЬТЕ_СЮДА_URL_ИЗ_APPS_SCRIPT';
+
+// Этажи. image: '' = демо-план. Для реального плана: 'plan-1.png' (файл лежит рядом с index.html).
+// axesX / axesY: название оси и её положение на картинке в пикселях (px).
+const FLOORS = [
+  {
+    name: '1 этаж',
+    elevation: '+0.000',
+    image: '',
+    axesX: [
+      { name: '1', px: 150 }, { name: '2', px: 330 }, { name: '3', px: 510 },
+      { name: '4', px: 690 }, { name: '5', px: 870 }, { name: '6', px: 1050 }
+    ],
+    axesY: [
+      { name: 'А', px: 120 }, { name: 'Б', px: 252 }, { name: 'В', px: 384 },
+      { name: 'Г', px: 516 }, { name: 'Д', px: 648 }, { name: 'Е', px: 780 }
+    ]
+  }
+];
+
+// ====================================================================
+
+const tg = window.Telegram && window.Telegram.WebApp;
+const initData = tg ? tg.initData : '';
+const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
+const DEBUG = new URLSearchParams(location.search).has('debug');
+
+if (tg) {
+  tg.ready();
+  tg.expand();
+  try { if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) {}
+}
+
+const $ = id => document.getElementById(id);
+const vp = $('vp'), stage = $('stage'), img = $('plan'), marker = $('marker');
+const resultEl = $('result'), sendBtn = $('send'), statusEl = $('status'), debugEl = $('debug');
+
+let floorIdx = 0, imgW = 0, imgH = 0;
+let s = 1, tx = 0, ty = 0, minS = 0.1, maxS = 10, userMoved = false;
+let point = null, surface = '', sending = false;
+
+function setStatus(text, kind) {
+  statusEl.textContent = text || '';
+  statusEl.className = kind || '';
+}
+
+// ---------- Демо-план: сетка осей 1–6 × А–Е ----------
+function demoPlan(f) {
+  const W = 1200, H = 900;
+  const X = f.axesX.map(a => a.px), Y = f.axesY.map(a => a.px);
+  const x0 = X[0], x1 = X[X.length - 1], y0 = Y[0], y1 = Y[Y.length - 1];
+  let g = '';
+  g += `<rect width="${W}" height="${H}" fill="#fff"/>`;
+  // Оси
+  f.axesX.forEach(a => {
+    g += `<line x1="${a.px}" y1="70" x2="${a.px}" y2="830" stroke="#b33" stroke-width="1.5" stroke-dasharray="26 6 4 6"/>`;
+    [45, 855].forEach(cy => {
+      g += `<circle cx="${a.px}" cy="${cy}" r="22" fill="#fff" stroke="#333" stroke-width="2"/>`;
+      g += `<text x="${a.px}" y="${cy + 8}" font-size="22" font-family="Arial" text-anchor="middle" fill="#222">${a.name}</text>`;
+    });
+  });
+  f.axesY.forEach(a => {
+    g += `<line x1="70" y1="${a.px}" x2="1130" y2="${a.px}" stroke="#b33" stroke-width="1.5" stroke-dasharray="26 6 4 6"/>`;
+    [45, 1155].forEach(cx => {
+      g += `<circle cx="${cx}" cy="${a.px}" r="22" fill="#fff" stroke="#333" stroke-width="2"/>`;
+      g += `<text x="${cx}" y="${a.px + 8}" font-size="22" font-family="Arial" text-anchor="middle" fill="#222">${a.name}</text>`;
+    });
+  });
+  // Наружные стены
+  g += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="#222" stroke-width="12"/>`;
+  // Коридор между осями В и Г
+  g += `<line x1="${x0}" y1="${Y[2]}" x2="${x1}" y2="${Y[2]}" stroke="#222" stroke-width="7"/>`;
+  g += `<line x1="${x0}" y1="${Y[3]}" x2="${x1}" y2="${Y[3]}" stroke="#222" stroke-width="7"/>`;
+  // Перегородки кабинетов
+  for (let i = 1; i < X.length - 1; i++) {
+    g += `<line x1="${X[i]}" y1="${y0}" x2="${X[i]}" y2="${Y[2]}" stroke="#222" stroke-width="5"/>`;
+    g += `<line x1="${X[i]}" y1="${Y[3]}" x2="${X[i]}" y2="${y1}" stroke="#222" stroke-width="5"/>`;
+  }
+  // Подписи помещений
+  let n = 101;
+  for (let i = 0; i < X.length - 1; i++) {
+    const cx = (X[i] + X[i + 1]) / 2;
+    g += `<text x="${cx}" y="${(y0 + Y[2]) / 2}" font-size="26" font-family="Arial" text-anchor="middle" fill="#666">${n++}</text>`;
+  }
+  for (let i = 0; i < X.length - 1; i++) {
+    const cx = (X[i] + X[i + 1]) / 2;
+    g += `<text x="${cx}" y="${(Y[3] + y1) / 2}" font-size="26" font-family="Arial" text-anchor="middle" fill="#666">${n++}</text>`;
+  }
+  g += `<text x="${(x0 + x1) / 2}" y="${(Y[2] + Y[3]) / 2 + 9}" font-size="24" font-family="Arial" text-anchor="middle" fill="#888">Коридор</text>`;
+  g += `<text x="${W / 2}" y="890" font-size="16" font-family="Arial" text-anchor="middle" fill="#999">Демо-план ${f.name}, отм. ${f.elevation}</text>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${g}</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+// ---------- Отображение и зум ----------
+function apply() {
+  stage.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  marker.style.transform = `scale(${1 / s})`;
+}
+
+function fit() {
+  const r = vp.getBoundingClientRect();
+  if (!r.width || !r.height || !imgW) return;
+  s = Math.min(r.width / imgW, r.height / imgH) * 0.96;
+  minS = s * 0.7;
+  maxS = s * 15;
+  tx = (r.width - imgW * s) / 2;
+  ty = (r.height - imgH * s) / 2;
+  apply();
+}
+
+function clampS(v) { return Math.max(minS, Math.min(maxS, v)); }
+
+function zoomAt(cx, cy, factor) {
+  const ix = (cx - tx) / s, iy = (cy - ty) / s;
+  s = clampS(s * factor);
+  tx = cx - ix * s;
+  ty = cy - iy * s;
+  userMoved = true;
+  apply();
+}
+
+function loadFloor(i) {
+  floorIdx = i;
+  const f = FLOORS[i];
+  $('floorName').textContent = FLOORS.length > 1 ? '' : `${f.name}, отм. ${f.elevation}`;
+  point = null;
+  marker.hidden = true;
+  img.onload = () => {
+    imgW = img.naturalWidth; imgH = img.naturalHeight;
+    img.style.width = imgW + 'px'; img.style.height = imgH + 'px';
+    stage.style.width = imgW + 'px'; stage.style.height = imgH + 'px';
+    userMoved = false;
+    fit();
+    updateResult();
+  };
+  img.onerror = () => setStatus('Не удалось загрузить план: ' + f.image + '. Проверьте имя файла в репозитории.', 'err');
+  img.src = f.image || demoPlan(f);
+}
+
+// ---------- Жесты: перетаскивание, щипок, тап ----------
+const pointers = new Map();
+let g = null;
+
+function localXY(e) {
+  const r = vp.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+vp.addEventListener('pointerdown', e => {
+  vp.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, localXY(e));
+  if (pointers.size === 1) {
+    const p = localXY(e);
+    g = { mode: 'pan', sx: p.x, sy: p.y, tx0: tx, ty0: ty, t0: Date.now(), moved: false, multi: false };
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    g = {
+      mode: 'pinch', multi: true,
+      d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      s0: s, tx0: tx, ty0: ty
+    };
+  }
+});
+
+vp.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId) || !g) return;
+  const p = localXY(e);
+  pointers.set(e.pointerId, p);
+  if (g.mode === 'pinch' && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const ix = (g.m0.x - g.tx0) / g.s0, iy = (g.m0.y - g.ty0) / g.s0;
+    s = clampS(g.s0 * d / g.d0);
+    tx = m.x - ix * s;
+    ty = m.y - iy * s;
+    userMoved = true;
+    apply();
+  } else if (g.mode === 'pan') {
+    const dx = p.x - g.sx, dy = p.y - g.sy;
+    if (!g.moved && Math.hypot(dx, dy) > 8) g.moved = true;
+    if (g.moved) {
+      tx = g.tx0 + dx; ty = g.ty0 + dy;
+      userMoved = true;
+      apply();
+    }
+  }
+});
+
+function endPointer(e) {
+  if (!pointers.has(e.pointerId)) return;
+  const p = localXY(e);
+  pointers.delete(e.pointerId);
+  if (pointers.size === 0) {
+    if (g && g.mode === 'pan' && !g.moved && !g.multi && e.type === 'pointerup' && Date.now() - g.t0 < 600) {
+      placeAt(p.x, p.y);
+    }
+    g = null;
+  } else if (pointers.size === 1) {
+    const [q] = [...pointers.values()];
+    g = { mode: 'pan', sx: q.x, sy: q.y, tx0: tx, ty0: ty, t0: 0, moved: true, multi: true };
+  }
+}
+vp.addEventListener('pointerup', endPointer);
+vp.addEventListener('pointercancel', endPointer);
+
+vp.addEventListener('wheel', e => {
+  e.preventDefault();
+  const p = localXY(e);
+  zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+}, { passive: false });
+
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+function zoomCenter(f) {
+  const r = vp.getBoundingClientRect();
+  zoomAt(r.width / 2, r.height / 2, f);
+}
+$('zIn').onclick = () => zoomCenter(1.5);
+$('zOut').onclick = () => zoomCenter(1 / 1.5);
+$('zFit').onclick = () => { userMoved = false; fit(); };
+window.addEventListener('resize', () => { if (!userMoved) fit(); });
+
+// ---------- Точка и оси ----------
+function placeAt(cx, cy) {
+  const ix = (cx - tx) / s, iy = (cy - ty) / s;
+  if (ix < 0 || iy < 0 || ix > imgW || iy > imgH) {
+    setStatus('Точка вне плана. Коснитесь внутри чертежа.', 'err');
+    return;
+  }
+  point = { x: ix, y: iy };
+  marker.style.left = ix + 'px';
+  marker.style.top = iy + 'px';
+  marker.hidden = false;
+  $('hint').hidden = true;
+  setStatus('');
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+  if (DEBUG) {
+    debugEl.hidden = false;
+    debugEl.textContent = `Калибровка: x = ${Math.round(ix)} px, y = ${Math.round(iy)} px (размер плана ${imgW}×${imgH})`;
+  }
+  updateResult();
+}
+
+// Возвращает «3–4», «3» (точно по оси) или «за 6» (за крайней осью)
+function axisPart(list, v) {
+  const a = list.map((x, i) => ({ name: x.name, px: x.px, i })).sort((p, q) => p.px - q.px);
+  let gap = Infinity;
+  for (let k = 1; k < a.length; k++) gap = Math.min(gap, a[k].px - a[k - 1].px);
+  const tol = isFinite(gap) ? gap * 0.08 : 10;
+  for (const x of a) if (Math.abs(v - x.px) <= tol) return x.name;
+  if (v < a[0].px) return 'за ' + a[0].name;
+  if (v > a[a.length - 1].px) return 'за ' + a[a.length - 1].name;
+  for (let k = 0; k < a.length - 1; k++) {
+    if (v > a[k].px && v < a[k + 1].px) {
+      const [p, q] = a[k].i < a[k + 1].i ? [a[k], a[k + 1]] : [a[k + 1], a[k]];
+      return p.name + '–' + q.name;
+    }
+  }
+  return '?';
+}
+
+function axesText() {
+  const f = FLOORS[floorIdx];
+  return axisPart(f.axesX, point.x) + ' / ' + axisPart(f.axesY, point.y);
+}
+
+function updateResult() {
+  const f = FLOORS[floorIdx];
+  if (!point) {
+    resultEl.textContent = 'Точка не выбрана';
+    resultEl.className = 'empty';
+  } else {
+    resultEl.textContent = `${f.name}, отм. ${f.elevation}, оси ${axesText()}` + (surface ? `, ${surface}` : '');
+    resultEl.className = '';
+  }
+  sendBtn.disabled = !(point && surface) || sending;
+}
+
+document.querySelectorAll('#surfaces button').forEach(b => {
+  b.onclick = () => {
+    surface = b.dataset.v;
+    document.querySelectorAll('#surfaces button').forEach(x => x.classList.toggle('on', x === b));
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+    updateResult();
+  };
+});
+
+// ---------- Отправка ----------
+sendBtn.onclick = async () => {
+  if (!point || !surface) return;
+  if (!/^https:\/\//.test(WEB_APP_URL)) {
+    setStatus('В index.html не вставлен WEB_APP_URL.', 'err');
+    return;
+  }
+  const f = FLOORS[floorIdx];
+  const payload = {
+    initData: initData,
+    floor: f.name,
+    elevation: f.elevation,
+    axes: axesText(),
+    surface: surface,
+    comment: $('comment').value.trim(),
+    px: Math.round(point.x),
+    py: Math.round(point.y)
+  };
+  sending = true; updateResult();
+  setStatus('Отправляю…');
+  try {
+    const r = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    const res = await r.json();
+    if (res.ok) {
+      setStatus('Отправлено в тему ✅', 'ok');
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      setTimeout(() => { if (tg) tg.close(); }, 1500);
+    } else {
+      setStatus('Ошибка: ' + (res.error || 'неизвестная'), 'err');
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+      sending = false; updateResult();
+    }
+  } catch (err) {
+    setStatus('Нет связи с сервером: ' + err.message, 'err');
+    sending = false; updateResult();
+  }
+};
+
+// ---------- Старт ----------
+(function init() {
+  if (FLOORS.length > 1) {
+    const sel = $('floorSel');
+    FLOORS.forEach((f, i) => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = `${f.name}, отм. ${f.elevation}`;
+      sel.appendChild(o);
+    });
+    sel.hidden = false;
+    sel.onchange = () => loadFloor(Number(sel.value));
+  }
+  loadFloor(0);
+  if (!initData) setStatus('Открыто вне Telegram: смотреть план можно, отправка не сработает.');
+  else if (!startParam) setStatus('Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.', 'err');
+})();
+</script>
+</body>
+</html>
