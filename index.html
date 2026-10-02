@@ -140,8 +140,14 @@ const PLANS = {
 // ====================================================================
 
 const tg = window.Telegram && window.Telegram.WebApp;
-const initData = tg ? tg.initData : '';
-const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
+// Запасной путь: Telegram кладёт подпись в адрес страницы (#tgWebAppData=…),
+// поэтому отправка работает, даже если telegram-web-app.js не загрузился.
+const HASH = new URLSearchParams(location.hash.slice(1));
+const initData = (tg && tg.initData) || HASH.get('tgWebAppData') || '';
+const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param)
+  || new URLSearchParams(initData).get('start_param') || HASH.get('tgWebAppStartParam') || '';
+const DIAG = `скрипт TG: ${tg ? 'да' : 'нет'}, подпись: ${initData ? 'да' : 'нет'}, тема: ${startParam || 'нет'}, `
+  + `${(tg && tg.platform) || HASH.get('tgWebAppPlatform') || '?'} ${(tg && tg.version) || HASH.get('tgWebAppVersion') || ''}`;
 const QS = new URLSearchParams(location.search);
 const DEBUG = QS.has('debug');
 
@@ -497,7 +503,7 @@ sendBtn.onclick = async () => {
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
       setTimeout(() => { if (tg) tg.close(); }, 1500);
     } else {
-      setStatus('Ошибка: ' + (res.error || 'неизвестная'), 'err');
+      setStatus('Ошибка: ' + (res.error || 'неизвестная') + ' [' + DIAG + ']', 'err');
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
       sending = false; updateResult();
     }
@@ -520,7 +526,7 @@ sendBtn.onclick = async () => {
     sel.onchange = () => loadFloor(Number(sel.value));
   }
   loadFloor(0);
-  if (!initData) setStatus('Открыто вне Telegram: смотреть план можно, отправка не сработает.');
+  if (!initData) setStatus('Нет подписи Telegram: смотреть план можно, отправка не сработает. [' + DIAG + ']');
   else if (!startParam) setStatus('Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.', 'err');
 })();
 </script>
