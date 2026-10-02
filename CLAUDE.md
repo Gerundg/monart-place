@@ -41,8 +41,8 @@ const OBJECTS = {
 - [x] Место.gs вставлен в проект, `mesto_testSend` работает
 - [x] `mesto_postPinButton` закрепил кнопку в «тест 1» мед колледжа
 - [x] Аккаунт GitHub есть (Gerundg)
-- [ ] Веб-приложение развернуто (Выполнять как: Я, Доступ: Все), URL `/exec` вставлен в index.html — проверить
-- [ ] index.html выложен на GitHub Pages — проверить
+- [x] Веб-приложение развернуто, URL `/exec` вставлен в index.html (проверено: doGet отвечает)
+- [x] index.html и планы выложены на GitHub Pages
 - [ ] Mini App создан в BotFather (`/newapp`, short name `place`) — проверить
 - [ ] Проверка с телефона в «тест 1»: точка доходит в тему и в Inbox
 
