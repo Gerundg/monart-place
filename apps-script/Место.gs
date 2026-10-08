@@ -240,6 +240,30 @@ function mesto_json_(obj) {
 // ================= Запускать вручную из редактора =================
 
 /**
+ * Проверка без отправки сообщений: для каждого объекта из OBJECTS — открывается ли таблица,
+ * есть ли лист Inbox, видит ли бот группу. Результат — в журнале.
+ */
+function mesto_diag() {
+  try { console.log('Бот: @' + mesto_tg_('getMe', {}).username); }
+  catch (e) { console.log('❌ Telegram: ' + e.message); }
+  Object.keys(OBJECTS).forEach(function (id) {
+    const o = OBJECTS[id];
+    let line = o.name + ' (' + id + '): ';
+    try {
+      const ss = SpreadsheetApp.openById(o.sheetId);
+      const sh = ss.getSheetByName('Inbox');
+      line += 'таблица «' + ss.getName() + '» — ' + (sh ? 'лист Inbox есть, строк: ' + sh.getLastRow() : '❌ НЕТ листа «Inbox»');
+    } catch (e) {
+      line += '❌ таблица не открывается: ' + e.message;
+    }
+    try { line += '; группа «' + mesto_tg_('getChat', { chat_id: id }).title + '» видна'; }
+    catch (e) { line += '; ❌ группа: ' + e.message; }
+    console.log(line);
+  });
+  if (!OBJECTS['-1004448770601']) console.log('❌ В OBJECTS нет Биолаборатории (-1004448770601)');
+}
+
+/**
  * Публикует в каждой теме из MESTO_PIN_TARGETS сообщение с кнопкой «📍 Указать место» и закрепляет его.
  * Боту нужно право «Закреплять сообщения».
  */
