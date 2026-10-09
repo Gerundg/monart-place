@@ -31,6 +31,8 @@
   .bar select{flex:1;min-width:0;font-size:15px;padding:6px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--bg);color:var(--text)}
   .bar .floor-name{flex:1;font-weight:600}
   .zoom{display:flex;gap:6px}
+  #lang{flex:none;width:38px;height:34px;padding:0;border:0;border-radius:8px;background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center}
+  #lang svg{width:26px;height:18px;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
   .zoom button{width:38px;height:34px;border:0;border-radius:8px;background:var(--bg);color:var(--text);font-size:18px;cursor:pointer}
   #vp{flex:1;position:relative;overflow:hidden;touch-action:none;background:#fff;cursor:crosshair}
   #stage{position:absolute;left:0;top:0;transform-origin:0 0}
@@ -67,6 +69,7 @@
 <header class="bar">
   <select id="floorSel" hidden></select>
   <span id="floorName" class="floor-name"></span>
+  <button id="lang" type="button"></button>
   <div class="zoom">
     <button id="zIn" aria-label="Приблизить">+</button>
     <button id="zOut" aria-label="Отдалить">−</button>
@@ -79,22 +82,22 @@
     <img id="plan" alt="План этажа" draggable="false">
     <div id="marker" hidden><div class="pin"></div><div class="dot"></div></div>
   </div>
-  <div id="hint">Коснитесь плана в нужном месте</div>
+  <div id="hint" data-i18n="hint">Коснитесь плана в нужном месте</div>
 </main>
 
 <section class="panel">
   <div id="result" class="empty">Точка не выбрана</div>
   <div class="seg" id="surfaces">
-    <button data-v="пол">Пол</button>
-    <button data-v="потолок">Потолок</button>
-    <button data-v="стена">Стена</button>
+    <button data-v="пол" data-i18n="пол">Пол</button>
+    <button data-v="потолок" data-i18n="потолок">Потолок</button>
+    <button data-v="стена" data-i18n="стена">Стена</button>
   </div>
   <textarea id="comment" rows="2" maxlength="500" placeholder="Комментарий (необязательно)"></textarea>
   <div class="photos" id="photos">
     <button id="addPhoto" type="button">📷 Фото</button>
     <input id="photoInput" type="file" accept="image/*" multiple hidden>
   </div>
-  <button id="send" disabled>Отправить</button>
+  <button id="send" disabled data-i18n="send">Отправить</button>
   <div id="status"></div>
   <div id="debug" hidden></div>
 </section>
@@ -221,6 +224,66 @@ if (tg) {
 }
 
 const $ = id => document.getElementById(id);
+
+// ---------- Язык интерфейса: русский / турецкий ----------
+// Переводится только интерфейс. В чат и в таблицу точка всегда уходит по-русски.
+const I18N = {
+  ru: {
+    title: 'Указать место', hint: 'Коснитесь плана в нужном месте', none: 'Точка не выбрана',
+    пол: 'Пол', потолок: 'Потолок', стена: 'Стена', comment: 'Комментарий (необязательно)',
+    photo: 'Фото', send: 'Отправить', sending: 'Отправляю…', sendingPhotos: n => `Отправляю (фото: ${n})…`,
+    sent: 'Отправлено в тему ✅', error: 'Ошибка: ', unknown: 'неизвестная', noServer: 'Нет связи с сервером: ',
+    preparing: 'Готовлю фото…', photoErr: 'Фото: ', snapErr: 'Не удалось сделать схему: ',
+    outside: 'Точка вне плана. Коснитесь внутри чертежа.', loadErr: 'Не удалось загрузить план: ',
+    noSign: 'Нет подписи Telegram: смотреть план можно, отправка не сработает.',
+    noTopic: 'Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.',
+    axes: 'оси', elev: 'отм.', siteMarked: 'место отмечено, схема уйдёт вместе с фото',
+    floors: 'Этажи', facades: 'Фасады', switchTo: 'Türkçe'
+  },
+  tr: {
+    title: 'Yeri işaretle', hint: 'Planda ilgili yere dokunun', none: 'Nokta seçilmedi',
+    пол: 'Zemin', потолок: 'Tavan', стена: 'Duvar', comment: 'Yorum (isteğe bağlı)',
+    photo: 'Fotoğraf', send: 'Gönder', sending: 'Gönderiliyor…', sendingPhotos: n => `Gönderiliyor (fotoğraf: ${n})…`,
+    sent: 'Konuya gönderildi ✅', error: 'Hata: ', unknown: 'bilinmiyor', noServer: 'Sunucuya bağlanılamadı: ',
+    preparing: 'Fotoğraflar hazırlanıyor…', photoErr: 'Fotoğraf: ', snapErr: 'Şema oluşturulamadı: ',
+    outside: 'Nokta planın dışında. Çizimin içine dokunun.', loadErr: 'Plan yüklenemedi: ',
+    noSign: 'Telegram imzası yok: planı görebilirsiniz, gönderim çalışmaz.',
+    noTopic: 'Konu bağlantısı yok. Sabitlenmiş mesajdaki «📍 Указать место» düğmesiyle açın.',
+    axes: 'akslar', elev: 'kot', siteMarked: 'yer işaretlendi, şema fotoğraflarla birlikte gönderilecek',
+    floors: 'Katlar', facades: 'Cepheler', switchTo: 'Русский',
+    // ошибки сервера (приходят по-русски)
+    'Не выбрана точка на плане.': 'Planda nokta seçilmedi.',
+    'Не выбрана поверхность.': 'Yüzey seçilmedi.',
+    'Сессия устарела. Закройте и откройте приложение заново.': 'Oturum süresi doldu. Uygulamayı kapatıp yeniden açın.',
+    'Откройте приложение из Telegram (нет подписи).': 'Uygulamayı Telegram üzerinden açın (imza yok).',
+    'Нет привязки к теме. Откройте по кнопке из закрепа.': 'Konu bağlantısı yok. Sabitlenmiş mesajdaki düğmeyle açın.'
+  }
+};
+const FLAG = {
+  tr: '<svg viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#e30a17"/><circle cx="11" cy="10" r="5" fill="#fff"/><circle cx="12.25" cy="10" r="4" fill="#e30a17"/><polygon fill="#fff" transform="translate(18.3 10)" points="0,-2.2 0.65,-0.9 2.1,-0.68 1.05,0.34 1.3,1.78 0,1.1 -1.3,1.78 -1.05,0.34 -2.1,-0.68 -0.65,-0.9"/></svg>',
+  ru: '<svg viewBox="0 0 30 20" aria-hidden="true"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#0039a6"/><rect y="13.33" width="30" height="6.67" fill="#d52b1e"/></svg>'
+};
+let LANG = '';
+try { LANG = localStorage.getItem('mesto_lang') || ''; } catch (e) { LANG = ''; }
+if (!I18N[LANG]) LANG = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code === 'tr') ? 'tr' : 'ru';
+
+function L(key, ...args) {
+  const v = (I18N[LANG] && I18N[LANG][key] !== undefined) ? I18N[LANG][key] : I18N.ru[key];
+  return typeof v === 'function' ? v(...args) : (v !== undefined ? v : key);
+}
+// Перевод сообщения сервера (если оно известно)
+function Lsrv(msg) { return (LANG !== 'ru' && I18N[LANG][msg]) || msg; }
+
+// Название этажа/фасада для экрана (в чат уходит оригинальное русское)
+function trName(name) {
+  if (LANG !== 'tr') return name;
+  return name
+    .replace(/^(\d+) этаж$/, '$1. kat')
+    .replace(/^тех\.эт\.\s*/, 'teknik kat ')
+    .replace(/^Кровля$/, 'Çatı')
+    .replace(/^Фасад /, 'Cephe ')
+    .replace(/^Ген\.план$/, 'Vaziyet planı');
+}
 const vp = $('vp'), stage = $('stage'), img = $('plan'), marker = $('marker');
 const resultEl = $('result'), sendBtn = $('send'), statusEl = $('status'), debugEl = $('debug');
 
@@ -310,7 +373,7 @@ function zoomAt(cx, cy, factor) {
 }
 
 // «2 этаж, отм. +0.000» или просто «Ген.план»
-function floorLabel(f) { return f.elevation ? `${f.name}, отм. ${f.elevation}` : f.name; }
+function floorLabel(f) { return f.elevation ? `${trName(f.name)}, ${L('elev')} ${f.elevation}` : trName(f.name); }
 
 // Схема с меткой прикладывается к генплану и фасадам; поверхность там не выбирается
 function withSnapshot(f) { return !!(f.site || f.facade); }
@@ -331,7 +394,7 @@ function loadFloor(i) {
     fit();
     updateResult();
   };
-  img.onerror = () => setStatus('Не удалось загрузить план: ' + f.image + '. Проверьте имя файла в репозитории.', 'err');
+  img.onerror = () => setStatus(L('loadErr') + f.image, 'err');
   img.src = f.image || demoPlan(f);
 }
 
@@ -424,7 +487,7 @@ window.addEventListener('resize', () => { if (!userMoved) fit(); });
 function placeAt(cx, cy) {
   const ix = (cx - tx) / s, iy = (cy - ty) / s;
   if (ix < 0 || iy < 0 || ix > imgW || iy > imgH) {
-    setStatus('Точка вне плана. Коснитесь внутри чертежа.', 'err');
+    setStatus(L('outside'), 'err');
     return;
   }
   point = { x: ix, y: iy };
@@ -532,12 +595,12 @@ function axesText() {
 function updateResult() {
   const f = FLOORS[floorIdx];
   if (!point) {
-    resultEl.textContent = 'Точка не выбрана';
+    resultEl.textContent = L('none');
     resultEl.className = 'empty';
   } else {
-    resultEl.textContent = f.site ? `${floorLabel(f)}: место отмечено, схема уйдёт вместе с фото`
-      : f.facade ? `${f.name}, оси ${axesText()}, отм. ${facadeElevation(f, point.y)}`
-      : `${floorLabel(f)}, оси ${axesText()}` + (surface ? `, ${surface}` : '');
+    resultEl.textContent = f.site ? `${floorLabel(f)}: ${L('siteMarked')}`
+      : f.facade ? `${trName(f.name)}, ${L('axes')} ${axesText()}, ${L('elev')} ${facadeElevation(f, point.y)}`
+      : `${floorLabel(f)}, ${L('axes')} ${axesText()}` + (surface ? `, ${L(surface).toLowerCase()}` : '');
     resultEl.className = '';
   }
   sendBtn.disabled = !(point && (surface || withSnapshot(f))) || sending;
@@ -586,7 +649,7 @@ function renderPhotos() {
     t.querySelector('button').onclick = () => { photos.splice(i, 1); renderPhotos(); };
     box.appendChild(t);
   });
-  $('addPhoto').textContent = photos.length ? `📷 ${photos.length}/${MAX_PHOTOS}` : '📷 Фото';
+  $('addPhoto').textContent = photos.length ? `📷 ${photos.length}/${MAX_PHOTOS}` : '📷 ' + L('photo');
   $('addPhoto').disabled = photos.length >= MAX_PHOTOS || sending;
 }
 
@@ -595,12 +658,12 @@ $('photoInput').onchange = async e => {
   const files = [...e.target.files].slice(0, MAX_PHOTOS - photos.length);
   e.target.value = '';
   if (!files.length) return;
-  setStatus('Готовлю фото…');
+  setStatus(L('preparing'));
   for (const f of files) {
     try { photos.push(await compressPhoto(f)); }
-    catch (err) { setStatus('Фото: ' + err.message, 'err'); }
+    catch (err) { setStatus(L('photoErr') + err.message, 'err'); }
   }
-  if (statusEl.textContent === 'Готовлю фото…') setStatus('');
+  if (statusEl.textContent === L('preparing')) setStatus('');
   renderPhotos();
 };
 
@@ -638,14 +701,14 @@ sendBtn.onclick = async () => {
   let snapshot = null;
   if (withSnapshot(f)) {
     try { snapshot = planSnapshot(); }
-    catch (err) { setStatus('Не удалось сделать схему: ' + err.message, 'err'); return; }
+    catch (err) { setStatus(L('snapErr') + err.message, 'err'); return; }
   }
   const payload = {
     initData: initData,
     floor: f.name,
     elevation: f.facade ? facadeElevation(f, point.y) : f.elevation,
     axes: f.site ? '' : axesText(),
-    surface: withSnapshot(f) ? '' : surface,
+    surface: f.site ? '' : f.facade ? 'стена' : surface,   // фасад — всегда стена
     comment: $('comment').value.trim(),
     px: Math.round(point.x),
     py: Math.round(point.y),
@@ -653,7 +716,7 @@ sendBtn.onclick = async () => {
     photos: photos.map(p => p.data)
   };
   sending = true; updateResult(); renderPhotos();
-  setStatus(photos.length ? `Отправляю (фото: ${photos.length})…` : 'Отправляю…');
+  setStatus(photos.length ? L('sendingPhotos', photos.length) : L('sending'));
   try {
     const r = await fetch(WEB_APP_URL, {
       method: 'POST',
@@ -662,19 +725,37 @@ sendBtn.onclick = async () => {
     });
     const res = await r.json();
     if (res.ok) {
-      setStatus('Отправлено в тему ✅', 'ok');
+      setStatus(L('sent'), 'ok');
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
       setTimeout(() => { if (tg) tg.close(); }, 1500);
     } else {
-      setStatus('Ошибка: ' + (res.error || 'неизвестная') + ' [' + DIAG + ']', 'err');
+      setStatus(L('error') + (res.error ? Lsrv(res.error) : L('unknown')) + ' [' + DIAG + ']', 'err');
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
       sending = false; updateResult(); renderPhotos();
     }
   } catch (err) {
-    setStatus('Нет связи с сервером: ' + err.message, 'err');
+    setStatus(L('noServer') + err.message, 'err');
     sending = false; updateResult(); renderPhotos();
   }
 };
+
+// Перерисовать все подписи на текущем языке
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.title = L('title');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = L(el.dataset.i18n); });
+  $('comment').placeholder = L('comment');
+  const other = LANG === 'tr' ? 'ru' : 'tr';
+  $('lang').innerHTML = FLAG[other];
+  $('lang').title = L('switchTo');
+  $('lang').setAttribute('aria-label', L('switchTo'));
+  const sel = $('floorSel');
+  sel.querySelectorAll('optgroup').forEach(g => { g.label = L(g.dataset.key); });
+  sel.querySelectorAll('option').forEach(o => { o.textContent = floorLabel(FLOORS[Number(o.value)]); });
+  if (FLOORS.length <= 1) $('floorName').textContent = floorLabel(FLOORS[floorIdx]);
+  renderPhotos();
+  updateResult();
+}
 
 // ---------- Старт ----------
 (function init() {
@@ -686,16 +767,22 @@ sendBtn.onclick = async () => {
       const o = document.createElement('option');
       o.value = i; o.textContent = floorLabel(f);
       if (!hasFacades) { sel.appendChild(o); return; }
-      const g = f.facade ? 'Фасады' : 'Этажи';
-      if (!groups[g]) { groups[g] = document.createElement('optgroup'); groups[g].label = g; sel.appendChild(groups[g]); }
+      const g = f.facade ? 'facades' : 'floors';
+      if (!groups[g]) { groups[g] = document.createElement('optgroup'); groups[g].dataset.key = g; groups[g].label = L(g); sel.appendChild(groups[g]); }
       groups[g].appendChild(o);
     });
     sel.hidden = false;
     sel.onchange = () => loadFloor(Number(sel.value));
   }
+  $('lang').onclick = () => {
+    LANG = LANG === 'tr' ? 'ru' : 'tr';
+    try { localStorage.setItem('mesto_lang', LANG); } catch (e) {}
+    applyLang();
+  };
   loadFloor(0);
-  if (!initData) setStatus('Нет подписи Telegram: смотреть план можно, отправка не сработает. [' + DIAG + ']');
-  else if (!startParam) setStatus('Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.', 'err');
+  applyLang();
+  if (!initData) setStatus(L('noSign') + ' [' + DIAG + ']');
+  else if (!startParam) setStatus(L('noTopic'), 'err');
 })();
 </script>
 </body>
