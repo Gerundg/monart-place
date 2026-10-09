@@ -2,3 +2,7 @@
 source/
 botfather/
 СГП медколледж/
+plans/**/*.pdf
+plans/**/*.dwg
+plans/**/*.dxf
+plans/**/DWG/

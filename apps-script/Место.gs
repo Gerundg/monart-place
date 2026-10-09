@@ -294,9 +294,9 @@ function mesto_testSend() {
  * Картинки берутся с сайта мини-приложения.
  */
 function mesto_testSendPhoto() {
-  const base = 'https://gerundg.github.io/monart-place/plans/';
+  const base = 'https://gerundg.github.io/monart-place/plans/БТЛ/монолит/';
   const photos = ['bio-18410.png', 'bio-3200.png'].map(function (f) {
-    return Utilities.base64Encode(UrlFetchApp.fetch(base + f).getBlob().getBytes());
+    return Utilities.base64Encode(UrlFetchApp.fetch(encodeURI(base + f)).getBlob().getBytes());
   });
   console.log(mesto_testPost_(photos));
 }
@@ -306,7 +306,7 @@ function mesto_testSendPhoto() {
  */
 function mesto_testSendPlan() {
   const plan = Utilities.base64Encode(
-    UrlFetchApp.fetch('https://gerundg.github.io/monart-place/plans/med-genplan.png').getBlob().getBytes());
+    UrlFetchApp.fetch(encodeURI('https://gerundg.github.io/monart-place/plans/мед колледж/med-genplan.png')).getBlob().getBytes());
   console.log(mesto_testPost_([], { floor: 'Ген.план', elevation: '', axes: '', surface: '', plan: plan,
                                     comment: 'Тест генплана из редактора' }));
 }
