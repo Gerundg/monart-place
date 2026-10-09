@@ -836,7 +836,7 @@ sendBtn.onclick = async () => {
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
       setTimeout(() => { if (tg) tg.close(); }, 1500);
     } else {
-      setStatus(L('error') + (res.error ? Lsrv(res.error) : L('unknown')) + ' [' + DIAG + ']', 'err');
+      setStatus(L('error') + (res.error ? Lsrv(res.error) : L('unknown')) + ' [' + DIAG + ', сервер: ' + (res.v || 'старая версия') + ']', 'err');
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
       sending = false; updateResult(); renderPhotos();
     }

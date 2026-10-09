@@ -11,6 +11,7 @@ const MESTO_PEOPLE_CHAT    = '-1004315776569';   // объект, в табли�
 const MESTO_PEOPLE_SHEET   = 'TOPIC_NAMES';
 const MESTO_SURFACES       = ['пол', 'потолок', 'стена'];
 const MESTO_MAX_PHOTOS     = 5;
+const MESTO_VERSION        = 'v5 2026-10-09 обводка+перевод';   // видно в doGet и в ошибках приложения
 
 // Куда повесить закреп с кнопкой (функция mesto_postPinButton)
 // Уже закреплено (не запускать повторно, иначе будет вторая кнопка):
@@ -25,7 +26,7 @@ const MESTO_PIN_TARGETS = [
 
 /** Проверка в браузере: открыть URL веб-приложения — увидите эту строку. */
 function doGet() {
-  return ContentService.createTextOutput('Место: веб-приложение работает ✅');
+  return ContentService.createTextOutput('Место: веб-приложение работает ✅ ' + MESTO_VERSION);
 }
 
 /** Приём данных из мини-приложения. */
@@ -87,10 +88,10 @@ function doPost(e) {
     const inboxText = text + (photos.length ? '\n📷 Фото: ' + photos.length : '') + (plan ? '\n🗺 Схема с меткой' : '');
     sheet.appendRow([new Date(), inboxText, link, sender, companyRole, 'Место', 'Нет']);
 
-    return mesto_json_({ ok: true });
+    return mesto_json_({ ok: true, v: MESTO_VERSION });
   } catch (err) {
     console.error('Место doPost: ' + err.message);
-    return mesto_json_({ ok: false, error: err.message });
+    return mesto_json_({ ok: false, error: err.message, v: MESTO_VERSION });
   }
 }
 
