@@ -44,6 +44,12 @@
   #hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fff;
     padding:6px 12px;border-radius:14px;font-size:13px;pointer-events:none;white-space:nowrap}
   .panel{padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--bg);border-top:1px solid rgba(0,0,0,.08)}
+  #ink{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+  #ink path{fill:rgba(232,65,44,.12);stroke:var(--pin);stroke-width:4;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+  .modes{display:flex;gap:6px}
+  .modes button{flex:1;padding:8px 0;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:var(--sec);color:var(--text);font-size:14px;cursor:pointer}
+  .modes button.on{background:var(--btn);color:var(--btn-text);border-color:var(--btn)}
+  .modes #clearInk{flex:none;padding:8px 12px}
   #result{font-weight:600;min-height:20px}
   #result.empty{font-weight:400;color:var(--hint)}
   .seg{display:flex;gap:6px}
@@ -80,12 +86,18 @@
 <main id="vp">
   <div id="stage">
     <img id="plan" alt="План этажа" draggable="false">
+    <svg id="ink" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="marker" hidden><div class="pin"></div><div class="dot"></div></div>
   </div>
   <div id="hint" data-i18n="hint">Коснитесь плана в нужном месте</div>
 </main>
 
 <section class="panel">
+  <div class="modes" id="modes">
+    <button type="button" data-mode="point" class="on" data-i18n="modePoint">📍 Точка</button>
+    <button type="button" data-mode="area" data-i18n="modeArea">✏️ Обвести</button>
+    <button type="button" id="clearInk" hidden data-i18n="clear">Стереть</button>
+  </div>
   <div id="result" class="empty">Точка не выбрана</div>
   <div class="seg" id="surfaces">
     <button data-v="пол" data-i18n="пол">Пол</button>
@@ -238,7 +250,10 @@ const I18N = {
     noSign: 'Нет подписи Telegram: смотреть план можно, отправка не сработает.',
     noTopic: 'Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.',
     axes: 'оси', elev: 'отм.', siteMarked: 'место отмечено, схема уйдёт вместе с фото',
-    floors: 'Этажи', facades: 'Фасады', switchTo: 'Türkçe'
+    floors: 'Этажи', facades: 'Фасады', switchTo: 'Türkçe',
+    modePoint: '📍 Точка', modeArea: '✏️ Обвести', clear: 'Стереть',
+    areaHint: 'Обведите место пальцем', areaNone: 'Ничего не обведено',
+    areaDone: n => `обведено: ${n} ${n === 1 ? 'область' : n < 5 ? 'области' : 'областей'}, схема уйдёт вместе с фото`
   },
   tr: {
     title: 'Yeri işaretle', hint: 'Planda ilgili yere dokunun', none: 'Nokta seçilmedi',
@@ -251,6 +266,9 @@ const I18N = {
     noTopic: 'Konu bağlantısı yok. Sabitlenmiş mesajdaki «📍 Указать место» düğmesiyle açın.',
     axes: 'akslar', elev: 'kot', siteMarked: 'yer işaretlendi, şema fotoğraflarla birlikte gönderilecek',
     floors: 'Katlar', facades: 'Cepheler', switchTo: 'Русский',
+    modePoint: '📍 Nokta', modeArea: '✏️ Alan çiz', clear: 'Sil',
+    areaHint: 'İlgili yeri parmağınızla çizin', areaNone: 'Hiçbir alan çizilmedi',
+    areaDone: n => `çizilen alan: ${n}, şema fotoğraflarla birlikte gönderilecek`,
     // ошибки сервера (приходят по-русски)
     'Не выбрана точка на плане.': 'Planda nokta seçilmedi.',
     'Не выбрана поверхность.': 'Yüzey seçilmedi.',
@@ -290,6 +308,8 @@ const resultEl = $('result'), sendBtn = $('send'), statusEl = $('status'), debug
 let floorIdx = 0, imgW = 0, imgH = 0;
 let s = 1, tx = 0, ty = 0, minS = 0.1, maxS = 10, userMoved = false;
 let point = null, surface = '', sending = false;
+let mode = 'point';          // 'point' — точка с координатами, 'area' — обвести область
+const strokes = [];          // обведённые области: массивы точек [x, y] в px картинки
 
 function setStatus(text, kind) {
   statusEl.textContent = text || '';
@@ -375,7 +395,7 @@ function zoomAt(cx, cy, factor) {
 // «2 этаж, отм. +0.000» или просто «Ген.план»
 function floorLabel(f) { return f.elevation ? `${trName(f.name)}, ${L('elev')} ${f.elevation}` : trName(f.name); }
 
-// Схема с меткой прикладывается к генплану и фасадам; поверхность там не выбирается
+// На генплане и фасадах поверхность не выбирается (фасад — всегда стена)
 function withSnapshot(f) { return !!(f.site || f.facade); }
 
 function loadFloor(i) {
@@ -386,10 +406,13 @@ function loadFloor(i) {
   $('surfaces').style.display = withSnapshot(f) ? 'none' : '';
   point = null;
   marker.hidden = true;
+  strokes.length = 0; drawInk();
   img.onload = () => {
     imgW = img.naturalWidth; imgH = img.naturalHeight;
     img.style.width = imgW + 'px'; img.style.height = imgH + 'px';
     stage.style.width = imgW + 'px'; stage.style.height = imgH + 'px';
+    ink.setAttribute('width', imgW); ink.setAttribute('height', imgH);
+    ink.setAttribute('viewBox', `0 0 ${imgW} ${imgH}`);
     userMoved = false;
     fit();
     updateResult();
@@ -412,8 +435,15 @@ vp.addEventListener('pointerdown', e => {
   pointers.set(e.pointerId, localXY(e));
   if (pointers.size === 1) {
     const p = localXY(e);
+    if (mode === 'area' && e.button !== 1 && e.button !== 2) {
+      strokes.push([toImg(p)]);           // начинаем новый контур
+      g = { mode: 'draw' };
+      drawInk();
+      return;
+    }
     g = { mode: 'pan', sx: p.x, sy: p.y, tx0: tx, ty0: ty, t0: Date.now(), moved: false, multi: false };
   } else if (pointers.size === 2) {
+    if (g && g.mode === 'draw') { strokes.pop(); drawInk(); }   // второй палец — это зум, а не рисование
     const [a, b] = [...pointers.values()];
     g = {
       mode: 'pinch', multi: true,
@@ -428,6 +458,11 @@ vp.addEventListener('pointermove', e => {
   if (!pointers.has(e.pointerId) || !g) return;
   const p = localXY(e);
   pointers.set(e.pointerId, p);
+  if (g.mode === 'draw') {
+    const q = toImg(p), cur = strokes[strokes.length - 1], last = cur[cur.length - 1];
+    if (Math.hypot(q[0] - last[0], q[1] - last[1]) * s > 3) { cur.push(q); drawInk(); }
+    return;
+  }
   if (g.mode === 'pinch' && pointers.size >= 2) {
     const [a, b] = [...pointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
@@ -454,6 +489,15 @@ function endPointer(e) {
   const p = localXY(e);
   pointers.delete(e.pointerId);
   if (pointers.size === 0) {
+    if (g && g.mode === 'draw') {
+      const cur = strokes[strokes.length - 1];
+      // слишком короткий штрих — случайное касание
+      if (!cur || cur.length < 3 || strokeLength(cur) * s < 20) strokes.pop();
+      else if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+      drawInk(); updateResult();
+      g = null;
+      return;
+    }
     if (g && g.mode === 'pan' && !g.moved && !g.multi && e.type === 'pointerup' && Date.now() - g.t0 < 600) {
       placeAt(p.x, p.y);
     }
@@ -482,6 +526,27 @@ $('zIn').onclick = () => zoomCenter(1.5);
 $('zOut').onclick = () => zoomCenter(1 / 1.5);
 $('zFit').onclick = () => { userMoved = false; fit(); };
 window.addEventListener('resize', () => { if (!userMoved) fit(); });
+
+// ---------- Режим «Обвести» ----------
+const ink = $('ink');
+function toImg(p) { return [(p.x - tx) / s, (p.y - ty) / s]; }
+function strokeLength(st) { let l = 0; for (let i = 1; i < st.length; i++) l += Math.hypot(st[i][0] - st[i - 1][0], st[i][1] - st[i - 1][1]); return l; }
+function drawInk() {
+  ink.innerHTML = strokes.map(st => `<path d="M${st.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L')}${st.length > 2 ? ' Z' : ''}"/>`).join('');
+  $('clearInk').hidden = !(mode === 'area' && strokes.length);
+}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('#modes [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  marker.hidden = m !== 'point' || !point;
+  ink.style.display = m === 'area' ? '' : 'none';
+  vp.style.cursor = m === 'area' ? 'pointer' : 'crosshair';
+  $('hint').textContent = L(m === 'area' ? 'areaHint' : 'hint');
+  $('hint').hidden = m === 'point' ? !!point : strokes.length > 0;
+  drawInk(); updateResult();
+}
+document.querySelectorAll('#modes [data-mode]').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
+$('clearInk').onclick = () => { strokes.length = 0; drawInk(); updateResult(); $('hint').hidden = false; };
 
 // ---------- Точка и оси ----------
 function placeAt(cx, cy) {
@@ -594,6 +659,13 @@ function axesText() {
 
 function updateResult() {
   const f = FLOORS[floorIdx];
+  if (mode === 'area') {
+    resultEl.textContent = strokes.length ? `${floorLabel(f)}: ${L('areaDone', strokes.length)}` : L('areaNone');
+    resultEl.className = strokes.length ? '' : 'empty';
+    if (strokes.length) $('hint').hidden = true;
+    sendBtn.disabled = !strokes.length || sending;
+    return;
+  }
   if (!point) {
     resultEl.textContent = L('none');
     resultEl.className = 'empty';
@@ -667,25 +739,48 @@ $('photoInput').onchange = async e => {
   renderPhotos();
 };
 
-// ---------- Схема с меткой (для генплана) ----------
-// Кусок плана вокруг точки (примерно половина плана) с красной меткой, JPEG base64.
+// ---------- Схема с меткой ----------
+// Кусок плана с красной меткой (точка) или с обведёнными областями, JPEG base64.
 function planSnapshot() {
-  const OUT_W = 1280, OUT_H = 960;
-  let cw = Math.max(imgW * 0.55, 900), ch = cw * OUT_H / OUT_W;
-  if (ch > imgH) { ch = imgH; cw = ch * OUT_W / OUT_H; }
-  if (cw > imgW) { cw = imgW; ch = cw * OUT_H / OUT_W; }
-  const cx = Math.max(0, Math.min(imgW - cw, point.x - cw / 2));
-  const cy = Math.max(0, Math.min(imgH - ch, point.y - ch / 2));
+  const OUT_W = 1280, OUT_H = 960, R = OUT_W / OUT_H;
+  let cw, ch, mx, my;
+  if (mode === 'area') {
+    // рамка вокруг всех контуров с запасом, но не меньше половины плана
+    const xs = strokes.flat().map(q => q[0]), ys = strokes.flat().map(q => q[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    mx = (x0 + x1) / 2; my = (y0 + y1) / 2;
+    cw = Math.max((x1 - x0) * 1.6, (y1 - y0) * 1.6 * R, imgW * 0.5, 900);
+  } else {
+    mx = point.x; my = point.y;
+    cw = Math.max(imgW * 0.55, 900);
+  }
+  ch = cw / R;
+  if (ch > imgH) { ch = imgH; cw = ch * R; }
+  if (cw > imgW) { cw = imgW; ch = cw / R; }
+  const cx = Math.max(0, Math.min(imgW - cw, mx - cw / 2));
+  const cy = Math.max(0, Math.min(imgH - ch, my - ch / 2));
   const c = document.createElement('canvas');
   c.width = OUT_W; c.height = OUT_H;
   const g = c.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, OUT_W, OUT_H);
   g.drawImage(img, cx, cy, cw, ch, 0, 0, OUT_W, OUT_H);
-  const k = OUT_W / cw, x = (point.x - cx) * k, y = (point.y - cy) * k;
-  g.lineWidth = 7; g.strokeStyle = '#e8412c';
-  g.beginPath(); g.arc(x, y, 46, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = '#e8412c'; g.strokeStyle = '#fff'; g.lineWidth = 3;
-  g.beginPath(); g.arc(x, y, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+  const k = OUT_W / cw;
+  if (mode === 'area') {
+    g.lineJoin = g.lineCap = 'round';
+    strokes.forEach(st => {
+      g.beginPath();
+      st.forEach((q, i) => { const x = (q[0] - cx) * k, y = (q[1] - cy) * k; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+      if (st.length > 2) g.closePath();
+      g.fillStyle = 'rgba(232,65,44,.15)'; g.fill();
+      g.lineWidth = 6; g.strokeStyle = '#e8412c'; g.stroke();
+    });
+  } else {
+    const x = (point.x - cx) * k, y = (point.y - cy) * k;
+    g.lineWidth = 7; g.strokeStyle = '#e8412c';
+    g.beginPath(); g.arc(x, y, 46, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = '#e8412c'; g.strokeStyle = '#fff'; g.lineWidth = 3;
+    g.beginPath(); g.arc(x, y, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
   const d = c.toDataURL('image/jpeg', 0.85);
   return d.slice(d.indexOf(',') + 1);
 }
@@ -693,17 +788,28 @@ function planSnapshot() {
 // ---------- Отправка ----------
 sendBtn.onclick = async () => {
   const f = FLOORS[floorIdx];
-  if (!point || !(surface || withSnapshot(f))) return;
+  const area = mode === 'area';
+  if (area ? !strokes.length : (!point || !(surface || withSnapshot(f)))) return;
   if (!/^https:\/\//.test(WEB_APP_URL)) {
     setStatus('В index.html не вставлен WEB_APP_URL.', 'err');
     return;
   }
+  // схема с меткой — всегда (без неё обводка не имеет смысла; для точки — по возможности)
   let snapshot = null;
-  if (withSnapshot(f)) {
-    try { snapshot = planSnapshot(); }
-    catch (err) { setStatus(L('snapErr') + err.message, 'err'); return; }
-  }
-  const payload = {
+  try { snapshot = planSnapshot(); }
+  catch (err) { if (area || withSnapshot(f)) { setStatus(L('snapErr') + err.message, 'err'); return; } }
+  const payload = area ? {
+    initData: initData,
+    mode: 'area',                       // без координат: только план с обведённой частью
+    floor: f.name,
+    elevation: f.facade ? '' : f.elevation,
+    axes: '',
+    surface: (f.site || f.facade) ? '' : surface,
+    comment: $('comment').value.trim(),
+    plan: snapshot,
+    photos: photos.map(p => p.data),
+    lang: LANG
+  } : {
     initData: initData,
     floor: f.name,
     elevation: f.facade ? facadeElevation(f, point.y) : f.elevation,
@@ -713,7 +819,8 @@ sendBtn.onclick = async () => {
     px: Math.round(point.x),
     py: Math.round(point.y),
     plan: snapshot,                     // схема с меткой — уйдёт первой картинкой
-    photos: photos.map(p => p.data)
+    photos: photos.map(p => p.data),
+    lang: LANG
   };
   sending = true; updateResult(); renderPhotos();
   setStatus(photos.length ? L('sendingPhotos', photos.length) : L('sending'));
@@ -744,6 +851,7 @@ function applyLang() {
   document.documentElement.lang = LANG;
   document.title = L('title');
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = L(el.dataset.i18n); });
+  $('hint').textContent = L(mode === 'area' ? 'areaHint' : 'hint');
   $('comment').placeholder = L('comment');
   const other = LANG === 'tr' ? 'ru' : 'tr';
   $('lang').innerHTML = FLAG[other];

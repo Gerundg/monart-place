@@ -49,7 +49,9 @@ function doPost(e) {
     const surface   = mesto_clean_(body.surface, 20);
     const comment   = mesto_clean_(body.comment, 500);
     const photos = mesto_photos_(body.photos);
-    const plan = body.plan ? mesto_photos_([body.plan])[0] : null;   // схема с меткой (генплан)
+    const plan = body.plan ? mesto_photos_([body.plan])[0] : null;   // схема с меткой / обводкой
+    const area = body.mode === 'area';                                 // «Обвести»: без координат
+    if (area && !plan) throw new Error('Нет схемы с обведённой областью.');
     if (!floor || !(axes || plan)) throw new Error('Не выбрана точка на плане.');
     if (!plan && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Не выбрана поверхность.');
     if (surface && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Неизвестная поверхность.');
@@ -63,8 +65,14 @@ function doPost(e) {
       (elevation ? ', отм. ' + elevation : '') +
       (axes ? ', оси ' + axes : '') +
       (surface ? ', ' + surface : '') +
-      (plan ? ' — место отмечено на схеме' : '') + '.';
-    if (comment) text += '\nКомментарий: ' + comment;
+      (area ? ' — область обведена на схеме' : plan ? ' — место отмечено на схеме' : '') + '.';
+    if (comment) {
+      const ru = mesto_translate_(comment, body.lang);   // турецкий (и любой не кириллический) → + русский
+      text += ru
+        ? '\nКомментарий (' + (/[çğışöüİ]/i.test(comment) || body.lang === 'tr' ? 'TR' : 'ориг.') + '): ' + comment +
+          '\nКомментарий (RU): ' + ru
+        : '\nКомментарий: ' + comment;
+    }
     text += ' (от ' + name + ')';
 
     // 6. Пишем в тему: без фото — сообщение, с фото — фото/альбом с подписью
@@ -215,6 +223,21 @@ function mesto_send_(target, text, photos) {
   return mesto_tgFiles_('sendMediaGroup', fields)[0].message_id;
 }
 
+/**
+ * Перевод комментария на русский, если он написан не кириллицей (обычно — по-турецки).
+ * Возвращает русский текст или null (если перевод не нужен или не удался).
+ */
+function mesto_translate_(comment, lang) {
+  if (!comment || /[а-яё]/i.test(comment) || !/[a-zçğışöü]/i.test(comment)) return null;
+  try {
+    const ru = LanguageApp.translate(comment, lang === 'tr' ? 'tr' : '', 'ru');
+    return ru && ru.trim().toLowerCase() !== comment.trim().toLowerCase() ? ru.trim() : null;
+  } catch (err) {
+    console.error('mesto_translate_: ' + err.message);
+    return null;
+  }
+}
+
 /** Добавляет message_thread_id, если тема не «Общая». */
 function mesto_withThread_(payload, threadId) {
   if (threadId && threadId !== 1) payload.message_thread_id = threadId;
@@ -309,6 +332,11 @@ function mesto_testSendPlan() {
     UrlFetchApp.fetch(encodeURI('https://gerundg.github.io/monart-place/plans/мед колледж/med-genplan.png')).getBlob().getBytes());
   console.log(mesto_testPost_([], { floor: 'Ген.план', elevation: '', axes: '', surface: '', plan: plan,
                                     comment: 'Тест генплана из редактора' }));
+}
+
+/** Проверка перевода (ничего не отправляет). Первый запуск может попросить разрешение. */
+function mesto_testTranslate() {
+  console.log(mesto_translate_('Duvarda çatlak var, sıva dökülüyor', 'tr'));
 }
 
 /** Имитация запроса из мини-приложения с настоящей подписью (для тестов). */
