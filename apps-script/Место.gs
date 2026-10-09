@@ -70,7 +70,7 @@ function doPost(e) {
     if (comment) {
       const ru = mesto_translate_(comment, body.lang);   // турецкий (и любой не кириллический) → + русский
       text += ru
-        ? '\nКомментарий (' + (/[çğışöüİ]/i.test(comment) || body.lang === 'tr' ? 'TR' : 'ориг.') + '): ' + comment +
+        ? '\nКомментарий (' + (/[\u00e7\u011f\u0131\u015f\u00f6\u00fc\u0130]/i.test(comment) || body.lang === 'tr' ? 'TR' : 'ориг.') + '): ' + comment +
           '\nКомментарий (RU): ' + ru
         : '\nКомментарий: ' + comment;
     }
@@ -229,7 +229,7 @@ function mesto_send_(target, text, photos) {
  * Возвращает русский текст или null (если перевод не нужен или не удался).
  */
 function mesto_translate_(comment, lang) {
-  if (!comment || /[а-яё]/i.test(comment) || !/[a-zçğışöü]/i.test(comment)) return null;
+  if (!comment || /[а-яё]/i.test(comment) || !/[a-z\u00e7\u011f\u0131\u015f\u00f6\u00fc]/i.test(comment)) return null;
   try {
     const ru = LanguageApp.translate(comment, lang === 'tr' ? 'tr' : '', 'ru');
     return ru && ru.trim().toLowerCase() !== comment.trim().toLowerCase() ? ru.trim() : null;
