@@ -11,7 +11,7 @@ const MESTO_PEOPLE_CHAT    = '-1004315776569';   // объект, в табли�
 const MESTO_PEOPLE_SHEET   = 'TOPIC_NAMES';
 const MESTO_SURFACES       = ['пол', 'потолок', 'стена'];
 const MESTO_MAX_PHOTOS     = 5;
-const MESTO_VERSION        = 'v5 2026-10-09 обводка+перевод';   // видно в doGet и в ошибках приложения
+const MESTO_VERSION        = 'v6 2026-10-15 кнопка во всех темах';   // видно в doGet и в ошибках приложения
 
 // Куда повесить закреп с кнопкой (функция mesto_postPinButton)
 // Уже закреплено (не запускать повторно, иначе будет вторая кнопка):
@@ -292,17 +292,83 @@ function mesto_diag() {
  * Боту нужно право «Закреплять сообщения».
  */
 function mesto_postPinButton() {
-  MESTO_PIN_TARGETS.forEach(function (t) {
-    const link = 'https://t.me/' + MESTO_BOT_USERNAME + '/' + MESTO_APP_SHORT_NAME +
-                 '?startapp=' + t.chatId + '_' + t.threadId;
-    const msg = mesto_tg_('sendMessage', mesto_withThread_({
-      chat_id: t.chatId,
-      text: 'Нажмите кнопку, чтобы отметить место дефекта или работ на плане.',
-      reply_markup: { inline_keyboard: [[{ text: '📍 Указать место', url: link }]] }
-    }, t.threadId));
-    mesto_tg_('pinChatMessage', { chat_id: t.chatId, message_id: msg.message_id, disable_notification: true });
-    console.log('Закреплено в ' + t.chatId + ' / тема ' + t.threadId + ': ' + link);
+  MESTO_PIN_TARGETS.forEach(function (t) { mesto_pinOne_(t.chatId, t.threadId); });
+}
+
+/** Одна кнопка «📍 Указать место» в теме + закреп. */
+function mesto_pinOne_(chatId, threadId) {
+  const link = 'https://t.me/' + MESTO_BOT_USERNAME + '/' + MESTO_APP_SHORT_NAME +
+               '?startapp=' + chatId + '_' + threadId;
+  const msg = mesto_tg_('sendMessage', mesto_withThread_({
+    chat_id: chatId,
+    text: 'Нажмите кнопку, чтобы отметить место дефекта или работ на плане.',
+    reply_markup: { inline_keyboard: [[{ text: '📍 Указать место', url: link }]] }
+  }, threadId));
+  mesto_tg_('pinChatMessage', { chat_id: chatId, message_id: msg.message_id, disable_notification: true });
+  console.log('Закреплено в ' + chatId + ' / тема ' + threadId + ': ' + link);
+}
+
+// ---------- Кнопка во всех темах ----------
+// Список тем берётся из листа TOPIC_NAMES (B chat_ID, C тема, D thread_ID) — у Telegram нет способа
+// получить список тем ботом. Где кнопка уже висит, запоминается в свойствах скрипта (MESTO_PINNED).
+const MESTO_PINNED_KEY = 'MESTO_PINNED';
+const MESTO_PINNED_BEFORE = ['-1004315776569_2', '-1004448770601_260', '-1004448770601_265', '-1004448770601_222'];
+
+function mesto_pinned_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(MESTO_PINNED_KEY);
+  const set = raw ? JSON.parse(raw) : {};
+  MESTO_PINNED_BEFORE.forEach(function (k) { set[k] = set[k] || 'до 2026-10-15'; });
+  return set;
+}
+
+/** Все темы объектов из TOPIC_NAMES без повторов: [{ chatId, threadId, name, key }]. */
+function mesto_topics_() {
+  const sh = SpreadsheetApp.openById(OBJECTS[MESTO_PEOPLE_CHAT].sheetId).getSheetByName(MESTO_PEOPLE_SHEET);
+  if (!sh) throw new Error('Нет листа ' + MESTO_PEOPLE_SHEET);
+  const rows = sh.getDataRange().getValues();
+  const seen = {}, out = [];
+  for (let r = 1; r < rows.length; r++) {
+    const chatId = String(rows[r][1] || '').trim();
+    if (!OBJECTS[chatId]) continue;                       // только группы объектов
+    const threadId = Number(rows[r][3]) || 1;             // пусто = «Общая» тема
+    const key = chatId + '_' + threadId;
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push({ chatId: chatId, threadId: threadId, name: String(rows[r][2] || '').trim(), key: key });
+  }
+  return out;
+}
+
+/** Только проверка: какие темы найдены и где кнопки ещё нет. Ничего не отправляет. */
+function mesto_listTopics() {
+  const pinned = mesto_pinned_();
+  const topics = mesto_topics_();
+  topics.forEach(function (t) {
+    console.log((pinned[t.key] ? '✅ уже есть  ' : '➕ добавлю    ') + OBJECTS[t.chatId].name +
+                ' / тема ' + t.threadId + (t.name ? ' «' + t.name + '»' : ''));
   });
+  console.log('Всего тем: ' + topics.length + ', без кнопки: ' + topics.filter(function (t) { return !pinned[t.key]; }).length);
+}
+
+/** Вешает и закрепляет кнопку во всех темах из TOPIC_NAMES, где её ещё нет. Повторный запуск дублей не делает. */
+function mesto_postPinAll() {
+  const props = PropertiesService.getScriptProperties();
+  const pinned = mesto_pinned_();
+  let done = 0, failed = 0;
+  mesto_topics_().forEach(function (t) {
+    if (pinned[t.key]) return;
+    try {
+      mesto_pinOne_(t.chatId, t.threadId);
+      pinned[t.key] = new Date().toISOString();
+      props.setProperty(MESTO_PINNED_KEY, JSON.stringify(pinned));
+      done++;
+      Utilities.sleep(1200);                              // не упереться в лимит Telegram
+    } catch (err) {
+      failed++;
+      console.log('❌ ' + OBJECTS[t.chatId].name + ' / тема ' + t.threadId + ': ' + err.message);
+    }
+  });
+  console.log('Готово: повешено ' + done + ', ошибок ' + failed);
 }
 
 /**
