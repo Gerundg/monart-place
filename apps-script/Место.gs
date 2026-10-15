@@ -11,7 +11,7 @@ const MESTO_PEOPLE_CHAT    = '-1004315776569';   // объект, в табли�
 const MESTO_PEOPLE_SHEET   = 'TOPIC_NAMES';
 const MESTO_SURFACES       = ['пол', 'потолок', 'стена'];
 const MESTO_MAX_PHOTOS     = 5;
-const MESTO_VERSION        = 'v6 2026-10-15 кнопка во всех темах';   // видно в doGet и в ошибках приложения
+const MESTO_VERSION        = 'v6.1 2026-10-15 кнопка во всех темах';   // видно в doGet и в ошибках приложения
 
 // Куда повесить закреп с кнопкой (функция mesto_postPinButton)
 // Уже закреплено (не запускать повторно, иначе будет вторая кнопка):
@@ -309,8 +309,10 @@ function mesto_pinOne_(chatId, threadId) {
 }
 
 // ---------- Кнопка во всех темах ----------
-// Список тем берётся из листа TOPIC_NAMES (B chat_ID, C тема, D thread_ID) — у Telegram нет способа
-// получить список тем ботом. Где кнопка уже висит, запоминается в свойствах скрипта (MESTO_PINNED).
+// У Telegram нет способа получить список тем ботом, поэтому темы собираются из двух мест:
+//  1) лист TOPIC_NAMES (B chat_ID, C тема, D thread_ID);
+//  2) колонка «Ссылка» листа Inbox каждого объекта (t.me/c/<чат>/<тема>/<сообщение>) — все темы, где писали.
+// Где кнопка уже висит, запоминается в свойствах скрипта (MESTO_PINNED).
 const MESTO_PINNED_KEY = 'MESTO_PINNED';
 const MESTO_PINNED_BEFORE = ['-1004315776569_2', '-1004448770601_260', '-1004448770601_265', '-1004448770601_222'];
 
@@ -321,22 +323,58 @@ function mesto_pinned_() {
   return set;
 }
 
-/** Все темы объектов из TOPIC_NAMES без повторов: [{ chatId, threadId, name, key }]. */
+/** Все темы объектов без повторов: [{ chatId, threadId, name, key }]. */
 function mesto_topics_() {
-  const sh = SpreadsheetApp.openById(OBJECTS[MESTO_PEOPLE_CHAT].sheetId).getSheetByName(MESTO_PEOPLE_SHEET);
-  if (!sh) throw new Error('Нет листа ' + MESTO_PEOPLE_SHEET);
-  const rows = sh.getDataRange().getValues();
   const seen = {}, out = [];
-  for (let r = 1; r < rows.length; r++) {
-    const chatId = String(rows[r][1] || '').trim();
-    if (!OBJECTS[chatId]) continue;                       // только группы объектов
-    const threadId = Number(rows[r][3]) || 1;             // пусто = «Общая» тема
+  function add(chatId, threadId, name) {
+    if (!OBJECTS[chatId]) return;                          // только группы объектов
+    threadId = Number(threadId) || 1;                      // пусто = «Общая» тема
     const key = chatId + '_' + threadId;
-    if (seen[key]) continue;
-    seen[key] = true;
-    out.push({ chatId: chatId, threadId: threadId, name: String(rows[r][2] || '').trim(), key: key });
+    if (seen[key]) { if (name && !seen[key].name) seen[key].name = name; return; }
+    seen[key] = { chatId: chatId, threadId: threadId, name: name || mesto_threadName_(chatId, threadId), key: key };
+    out.push(seen[key]);
   }
+
+  // 1) TOPIC_NAMES
+  const sh = SpreadsheetApp.openById(OBJECTS[MESTO_PEOPLE_CHAT].sheetId).getSheetByName(MESTO_PEOPLE_SHEET);
+  if (sh) {
+    const rows = sh.getDataRange().getValues();
+    for (let r = 1; r < rows.length; r++) add(String(rows[r][1] || '').trim(), rows[r][3], String(rows[r][2] || '').trim());
+  }
+
+  // 2) ссылки в Inbox каждого объекта (колонка C)
+  Object.keys(OBJECTS).forEach(function (chatId) {
+    try {
+      const inbox = SpreadsheetApp.openById(OBJECTS[chatId].sheetId).getSheetByName('Inbox');
+      if (!inbox || inbox.getLastRow() < 2) return;
+      const vals = inbox.getRange(2, 2, inbox.getLastRow() - 1, 2).getValues();   // B текст, C ссылка
+      const internal = String(chatId).replace(/^-100/, '');
+      for (let i = vals.length - 1; i >= 0; i--) {                                // с конца — свежие
+        const link = String(vals[i][1] || '');
+        if (link.indexOf('/c/' + internal + '/') < 0) continue;
+        let m = link.match(/\/c\/\d+\/(\d+)\/\d+/) || link.match(/[?&]thread=(\d+)/);
+        const threadId = m ? Number(m[1]) : 1;
+        const key = chatId + '_' + threadId;
+        if (!seen[key]) add(chatId, threadId, '');
+        if (seen[key] && !seen[key].sample) seen[key].sample = String(vals[i][0] || '').replace(/\s+/g, ' ').slice(0, 50);
+      }
+    } catch (err) {
+      console.log('⚠ Inbox ' + OBJECTS[chatId].name + ': ' + err.message);
+    }
+  });
   return out;
+}
+
+/** Название темы из THREAD_MAP («Сбор информации.gs»), если оно там есть. */
+function mesto_threadName_(chatId, threadId) {
+  try {
+    if (typeof THREAD_MAP === 'undefined' || !THREAD_MAP) return '';
+    const byChat = THREAD_MAP[chatId];
+    const v = (byChat && typeof byChat === 'object') ? byChat[threadId] : THREAD_MAP[threadId];
+    return typeof v === 'string' ? v : (v && (v.name || v.title)) || '';
+  } catch (err) {
+    return '';
+  }
 }
 
 /** Только проверка: какие темы найдены и где кнопки ещё нет. Ничего не отправляет. */
@@ -345,7 +383,8 @@ function mesto_listTopics() {
   const topics = mesto_topics_();
   topics.forEach(function (t) {
     console.log((pinned[t.key] ? '✅ уже есть  ' : '➕ добавлю    ') + OBJECTS[t.chatId].name +
-                ' / тема ' + t.threadId + (t.name ? ' «' + t.name + '»' : ''));
+                ' / тема ' + t.threadId + (t.threadId === 1 ? ' (Общая)' : '') +
+                (t.name ? ' «' + t.name + '»' : t.sample ? ' — последнее: «' + t.sample + '»' : ''));
   });
   console.log('Всего тем: ' + topics.length + ', без кнопки: ' + topics.filter(function (t) { return !pinned[t.key]; }).length);
 }
