@@ -11,7 +11,7 @@ const MESTO_PEOPLE_CHAT    = '-1004315776569';   // объект, в табли�
 const MESTO_PEOPLE_SHEET   = 'TOPIC_NAMES';
 const MESTO_SURFACES       = ['пол', 'потолок', 'стена'];
 const MESTO_MAX_PHOTOS     = 5;
-const MESTO_VERSION        = 'v6.1 2026-10-15 кнопка во всех темах';   // видно в doGet и в ошибках приложения
+const MESTO_VERSION        = 'v7 2026-10-19 весь план';   // видно в doGet и в ошибках приложения
 
 // Куда повесить закреп с кнопкой (функция mesto_postPinButton)
 // Уже закреплено (не запускать повторно, иначе будет вторая кнопка):
@@ -52,7 +52,9 @@ function doPost(e) {
     const photos = mesto_photos_(body.photos);
     const plan = body.plan ? mesto_photos_([body.plan])[0] : null;   // схема с меткой / обводкой
     const area = body.mode === 'area';                                 // «Обвести»: без координат
+    const whole = body.mode === 'whole';                               // «Весь план»: без точки
     if (area && !plan) throw new Error('Нет схемы с обведённой областью.');
+    if (whole && !plan) throw new Error('Нет картинки плана.');
     if (!floor || !(axes || plan)) throw new Error('Не выбрана точка на плане.');
     if (!plan && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Не выбрана поверхность.');
     if (surface && MESTO_SURFACES.indexOf(surface) < 0) throw new Error('Неизвестная поверхность.');
@@ -66,7 +68,7 @@ function doPost(e) {
       (elevation ? ', отм. ' + elevation : '') +
       (axes ? ', оси ' + axes : '') +
       (surface ? ', ' + surface : '') +
-      (area ? ' — область обведена на схеме' : plan ? ' — место отмечено на схеме' : '') + '.';
+      (whole ? ' — весь план (без точки)' : area ? ' — область обведена на схеме' : plan ? ' — место отмечено на схеме' : '') + '.';
     if (comment) {
       const ru = mesto_translate_(comment, body.lang);   // турецкий (и любой не кириллический) → + русский
       text += ru

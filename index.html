@@ -98,6 +98,7 @@
   <div class="modes" id="modes">
     <button type="button" data-mode="point" class="on" data-i18n="modePoint">📍 Точка</button>
     <button type="button" data-mode="area" data-i18n="modeArea">✏️ Обвести</button>
+    <button type="button" data-mode="whole" data-i18n="modeWhole">🗺 Весь план</button>
     <button type="button" id="clearInk" hidden data-i18n="clear">Стереть</button>
   </div>
   <div id="result" class="empty">Точка не выбрана</div>
@@ -271,7 +272,8 @@ const I18N = {
     noTopic: 'Нет привязки к теме. Откройте по кнопке «📍 Указать место» из закрепа.',
     axes: 'оси', elev: 'отм.', siteMarked: 'место отмечено, схема уйдёт вместе с фото',
     floors: 'Этажи', facades: 'Фасады (захватки)', switchTo: 'Türkçe',
-    modePoint: '📍 Точка', modeArea: '✏️ Обвести', clear: 'Стереть',
+    modePoint: '📍 Точка', modeArea: '✏️ Обвести', modeWhole: '🗺 Весь план', clear: 'Стереть',
+    wholeHint: 'Уйдёт весь план целиком', wholeDone: 'весь план без точки, уйдёт вместе с фото',
     areaHint: 'Обведите место пальцем', areaNone: 'Ничего не обведено',
     areaDone: n => `обведено: ${n} ${n === 1 ? 'область' : n < 5 ? 'области' : 'областей'}, схема уйдёт вместе с фото`
   },
@@ -286,7 +288,8 @@ const I18N = {
     noTopic: 'Konu bağlantısı yok. Sabitlenmiş mesajdaki «📍 Указать место» düğmesiyle açın.',
     axes: 'akslar', elev: 'kot', siteMarked: 'yer işaretlendi, şema fotoğraflarla birlikte gönderilecek',
     floors: 'Katlar', facades: 'Cepheler (bölgeler)', switchTo: 'Русский',
-    modePoint: '📍 Nokta', modeArea: '✏️ Alan çiz', clear: 'Sil',
+    modePoint: '📍 Nokta', modeArea: '✏️ Alan çiz', modeWhole: '🗺 Tüm plan', clear: 'Sil',
+    wholeHint: 'Planın tamamı gönderilecek', wholeDone: 'tüm plan, nokta yok — fotoğraflarla birlikte gönderilecek',
     areaHint: 'İlgili yeri parmağınızla çizin', areaNone: 'Hiçbir alan çizilmedi',
     areaDone: n => `çizilen alan: ${n}, şema fotoğraflarla birlikte gönderilecek`,
     // ошибки сервера (приходят по-русски)
@@ -329,7 +332,7 @@ const resultEl = $('result'), sendBtn = $('send'), statusEl = $('status'), debug
 let floorIdx = 0, imgW = 0, imgH = 0;
 let s = 1, tx = 0, ty = 0, minS = 0.1, maxS = 10, userMoved = false;
 let point = null, surface = '', sending = false;
-let mode = 'point';          // 'point' — точка с координатами, 'area' — обвести область
+let mode = 'point';          // 'point' — точка с координатами, 'area' — обвести область, 'whole' — весь план без точки
 const strokes = [];          // обведённые области: массивы точек [x, y] в px картинки
 
 function setStatus(text, kind) {
@@ -427,7 +430,7 @@ function loadFloor(i) {
   const f = FLOORS[i];
   grids = f.site ? [] : f.facade ? facadeGrid(f) : buildGrids(f);
   $('floorName').textContent = FLOORS.length > 1 ? '' : floorLabel(f);
-  $('surfaces').style.display = withSnapshot(f) ? 'none' : '';
+  $('surfaces').style.display = (withSnapshot(f) || mode === 'whole') ? 'none' : '';
   point = null;
   marker.hidden = true;
   strokes.length = 0; drawInk();
@@ -568,8 +571,9 @@ function setMode(m) {
   marker.hidden = m !== 'point' || !point;
   ink.style.display = m === 'area' ? '' : 'none';
   vp.style.cursor = m === 'area' ? 'pointer' : 'crosshair';
-  $('hint').textContent = L(m === 'area' ? 'areaHint' : 'hint');
-  $('hint').hidden = m === 'point' ? !!point : strokes.length > 0;
+  $('hint').textContent = L(m === 'area' ? 'areaHint' : m === 'whole' ? 'wholeHint' : 'hint');
+  $('hint').hidden = m === 'point' ? !!point : m === 'area' ? strokes.length > 0 : false;
+  $('surfaces').style.display = (withSnapshot(FLOORS[floorIdx]) || m === 'whole') ? 'none' : '';
   drawInk(); updateResult();
 }
 document.querySelectorAll('#modes [data-mode]').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
@@ -577,6 +581,7 @@ $('clearInk').onclick = () => { strokes.length = 0; drawInk(); updateResult(); $
 
 // ---------- Точка и оси ----------
 function placeAt(cx, cy) {
+  if (mode === 'whole') return;            // «Весь план»: точка не нужна
   const ix = (cx - tx) / s, iy = (cy - ty) / s;
   if (ix < 0 || iy < 0 || ix > imgW || iy > imgH) {
     setStatus(L('outside'), 'err');
@@ -686,6 +691,12 @@ function axesText() {
 
 function updateResult() {
   const f = FLOORS[floorIdx];
+  if (mode === 'whole') {
+    resultEl.textContent = `${floorLabel(f)}: ${L('wholeDone')}`;
+    resultEl.className = '';
+    sendBtn.disabled = sending;
+    return;
+  }
   if (mode === 'area') {
     resultEl.textContent = strokes.length ? `${floorLabel(f)}: ${L('areaDone', strokes.length)}` : L('areaNone');
     resultEl.className = strokes.length ? '' : 'empty';
@@ -769,27 +780,40 @@ $('photoInput').onchange = async e => {
 // ---------- Схема с меткой ----------
 // Кусок плана с красной меткой (точка) или с обведёнными областями, JPEG base64.
 function planSnapshot() {
-  const OUT_W = 1280, OUT_H = 960, R = OUT_W / OUT_H;
+  let OUT_W = 1280, OUT_H = 960;
   let cw, ch, mx, my;
-  if (mode === 'area') {
+  if (mode === 'whole') {
+    // весь план целиком, длинная сторона — 1600 px
+    const z = 1600 / Math.max(imgW, imgH);
+    OUT_W = Math.round(imgW * z); OUT_H = Math.round(imgH * z);
+    cw = imgW; ch = imgH; mx = imgW / 2; my = imgH / 2;
+  } else if (mode === 'area') {
     // рамка вокруг всех контуров с запасом, но не меньше половины плана
     const xs = strokes.flat().map(q => q[0]), ys = strokes.flat().map(q => q[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
     mx = (x0 + x1) / 2; my = (y0 + y1) / 2;
-    cw = Math.max((x1 - x0) * 1.6, (y1 - y0) * 1.6 * R, imgW * 0.5, 900);
+    cw = Math.max((x1 - x0) * 1.6, (y1 - y0) * 1.6 * OUT_W / OUT_H, imgW * 0.5, 900);
   } else {
     mx = point.x; my = point.y;
     cw = Math.max(imgW * 0.55, 900);
   }
-  ch = cw / R;
-  if (ch > imgH) { ch = imgH; cw = ch * R; }
-  if (cw > imgW) { cw = imgW; ch = cw / R; }
+  const R = OUT_W / OUT_H;
+  if (mode !== 'whole') {
+    ch = cw / R;
+    if (ch > imgH) { ch = imgH; cw = ch * R; }
+    if (cw > imgW) { cw = imgW; ch = cw / R; }
+  }
   const cx = Math.max(0, Math.min(imgW - cw, mx - cw / 2));
   const cy = Math.max(0, Math.min(imgH - ch, my - ch / 2));
+  // миниатюра-схема здания (где этот фасад); для «Весь план» — справа от плана, чтобы его не закрывать
+  const key = $('keyplan');
+  const hasKey = !!(FLOORS[floorIdx].key && key.complete && key.naturalWidth);
+  const kh = Math.round(OUT_H * 0.44), kw = hasKey ? kh * key.naturalWidth / key.naturalHeight : 0;
+  const side = mode === 'whole' && hasKey ? Math.round(kw + 32) : 0;
   const c = document.createElement('canvas');
-  c.width = OUT_W; c.height = OUT_H;
+  c.width = OUT_W + side; c.height = OUT_H;
   const g = c.getContext('2d');
-  g.fillStyle = '#fff'; g.fillRect(0, 0, OUT_W, OUT_H);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, OUT_W + side, OUT_H);
   g.drawImage(img, cx, cy, cw, ch, 0, 0, OUT_W, OUT_H);
   const k = OUT_W / cw;
   if (mode === 'area') {
@@ -801,19 +825,18 @@ function planSnapshot() {
       g.fillStyle = 'rgba(232,65,44,.15)'; g.fill();
       g.lineWidth = 6; g.strokeStyle = '#e8412c'; g.stroke();
     });
-  } else {
+  } else if (mode === 'point') {
     const x = (point.x - cx) * k, y = (point.y - cy) * k;
     g.lineWidth = 7; g.strokeStyle = '#e8412c';
     g.beginPath(); g.arc(x, y, 46, 0, Math.PI * 2); g.stroke();
     g.fillStyle = '#e8412c'; g.strokeStyle = '#fff'; g.lineWidth = 3;
     g.beginPath(); g.arc(x, y, 12, 0, Math.PI * 2); g.fill(); g.stroke();
   }
-  // миниатюра-схема здания (где этот фасад) — в верхнем углу, подальше от метки
-  const key = $('keyplan');
-  if (FLOORS[floorIdx].key && key.complete && key.naturalWidth) {
-    const kh = 420, kw = kh * key.naturalWidth / key.naturalHeight, ky = 16;
-    const mxOut = mode === 'area' ? (mx - cx) * k : (point.x - cx) * k;
-    const kx = mxOut > OUT_W - kw - 60 ? 16 : OUT_W - kw - 16;
+  // миниатюра — в верхнем углу, подальше от метки
+  if (hasKey) {
+    const ky = 16;
+    const mxOut = mode === 'point' ? (point.x - cx) * k : mode === 'area' ? (mx - cx) * k : 0;
+    const kx = side ? OUT_W + 16 : mxOut > OUT_W - kw - 60 ? 16 : OUT_W - kw - 16;
     g.fillStyle = '#fff'; g.fillRect(kx - 6, ky - 6, kw + 12, kh + 12);
     g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 2; g.strokeRect(kx - 6, ky - 6, kw + 12, kh + 12);
     g.drawImage(key, kx, ky, kw, kh);
@@ -825,8 +848,8 @@ function planSnapshot() {
 // ---------- Отправка ----------
 sendBtn.onclick = async () => {
   const f = FLOORS[floorIdx];
-  const area = mode === 'area';
-  if (area ? !strokes.length : (!point || !(surface || withSnapshot(f)))) return;
+  const area = mode === 'area', whole = mode === 'whole';
+  if (!whole && (area ? !strokes.length : (!point || !(surface || withSnapshot(f))))) return;
   if (!/^https:\/\//.test(WEB_APP_URL)) {
     setStatus('В index.html не вставлен WEB_APP_URL.', 'err');
     return;
@@ -834,14 +857,14 @@ sendBtn.onclick = async () => {
   // схема с меткой — всегда (без неё обводка не имеет смысла; для точки — по возможности)
   let snapshot = null;
   try { snapshot = planSnapshot(); }
-  catch (err) { if (area || withSnapshot(f)) { setStatus(L('snapErr') + err.message, 'err'); return; } }
-  const payload = area ? {
+  catch (err) { if (area || whole || withSnapshot(f)) { setStatus(L('snapErr') + err.message, 'err'); return; } }
+  const payload = (area || whole) ? {
     initData: initData,
-    mode: 'area',                       // без координат: только план с обведённой частью
+    mode: mode,                         // без координат: план с обведённой частью ('area') или весь план ('whole')
     floor: f.name,
     elevation: f.facade ? '' : f.elevation,
     axes: '',
-    surface: (f.site || f.facade) ? '' : surface,
+    surface: (f.site || f.facade || whole) ? '' : surface,
     comment: $('comment').value.trim(),
     plan: snapshot,
     photos: photos.map(p => p.data),
@@ -888,7 +911,7 @@ function applyLang() {
   document.documentElement.lang = LANG;
   document.title = L('title');
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = L(el.dataset.i18n); });
-  $('hint').textContent = L(mode === 'area' ? 'areaHint' : 'hint');
+  $('hint').textContent = L(mode === 'area' ? 'areaHint' : mode === 'whole' ? 'wholeHint' : 'hint');
   $('comment').placeholder = L('comment');
   const other = LANG === 'tr' ? 'ru' : 'tr';
   $('lang').innerHTML = FLAG[other];
